@@ -4,7 +4,11 @@ const path = require("path");
 const { URL } = require("url");
 const Busboy = require("busboy");
 const { processTool } = require("./lib/pdf-processor");
-const { optionsForTool } = require("./lib/tool-options");
+const {
+  optionsForTool,
+  processLabel,
+  processStatus,
+} = require("./lib/tool-options");
 
 const ROOT = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
@@ -58,6 +62,9 @@ function escapeHtml(s) {
 
 function renderToolPage(tool) {
   const isHtml = tool.path === "/html-to-pdf";
+  const btnLabel = processLabel(tool);
+  const statusLabel = processStatus(tool);
+  const toolClass = "tool-" + String(tool.path).replace(/^\//, "").replace(/_/g, "");
   const uploaderInner = isHtml
     ? `
       <form class="url-form" id="urlForm">
@@ -102,7 +109,7 @@ function renderToolPage(tool) {
     .header .ico, .nav-dropdown .ico, .menu .ico { display: block; }
   </style>
 </head>
-<body class="lang-en-US tool-page" data-tool="${escapeHtml(tool.path)}">
+<body class="lang-en-US tool-page ${escapeHtml(toolClass)}" data-tool="${escapeHtml(tool.path)}" data-process-label="${escapeHtml(btnLabel)}" data-process-status="${escapeHtml(statusLabel)}">
 ${header}
 <div class="main">
   <div class="tool tool--small">
@@ -112,19 +119,53 @@ ${header}
         <h1 class="tool__header__title">${escapeHtml(tool.page_title)}</h1>
         <h2 class="tool__header__subtitle">${escapeHtml(tool.desc)}</h2>
       </div>
-      ${optionsForTool(tool)}
-      <div class="uploading__bar uploading__bar--small">
-        <span class="uploading__bar__completed"></span>
+      <div class="uploading__bar uploading__bar--small" id="topUploadBar">
+        <span class="uploading__bar__completed" id="topUploadBarFill"></span>
       </div>
       <div id="uploader" class="uploader">
         ${uploaderInner}
       </div>
-      <div id="fileList" class="file-list hidden"></div>
-      <div id="process" class="process">
-        <p id="processText" class="processAction title2">${escapeHtml(tool.process)}</p>
-        <img src="/img/svg_icons/preload.svg" alt="Processing">
-      </div>
+      <div class="tool__workarea__rendered" id="fileGroups"></div>
     </div>
+    <div id="sidebar" class="tool__sidebar">
+      ${optionsForTool(tool)}
+    </div>
+    <div id="processTaskWrapper"></div>
+    <button type="button" id="processTask" class="btn btn--process btn--red ${escapeHtml(toolClass)}" style="display:none" disabled>
+      <span id="processTaskTextBtn">${escapeHtml(btnLabel)}</span>
+      <span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26" width="24" height="24" fill="#FFF" fill-rule="evenodd"><path d="M13 26C5.82 26 0 20.18 0 13S5.82 0 13 0s13 5.82 13 13-5.82 13-13 13zm0-2c6.075 0 11-4.925 11-11S19.075 2 13 2 2 6.925 2 13s4.925 11 11 11z" fill-rule="nonzero"/><path d="M18.684 13.105a.55.55 0 0 1-.148.378l-5.263 5.263a.55.55 0 0 1-.378.148.54.54 0 0 1-.526-.526V15.21H7.842a.54.54 0 0 1-.526-.526v-3.158A.54.54 0 0 1 7.842 11h4.526V7.842a.52.52 0 0 1 .526-.526c.148 0 .28.066.395.164l5.247 5.247a.55.55 0 0 1 .148.378z"/></svg>
+      </span>
+    </button>
+  </div>
+</div>
+<div id="uploading" class="uploading">
+  <div id="upload-status" class="uploading__status">
+    <div class="uploading__status__title user">Uploading file <span class="uploading__status__current" id="uploadCurrent">0</span> of <span class="uploading__status__total" id="uploadTotal">0</span></div>
+    <div class="uploading__status__file" id="uploadFileName"></div>
+    <div class="uploading__status__info">
+      Time left <span id="timeLeft">- seconds</span> -
+      Upload speed <span id="uploadSpeed">- MB/S</span>
+    </div>
+    <div class="uploading__bar">
+      <span class="uploading__bar__completed" id="uploadBarFill"></span>
+    </div>
+    <div class="uploading__status__percent">
+      <div class="uploading__status__percent__value" id="uploadPercent">0%</div>
+      Uploaded
+    </div>
+  </div>
+</div>
+<div id="process" class="process">
+  <p id="processText" class="processAction title2">${escapeHtml(statusLabel)}</p>
+  <img src="/img/svg_icons/preload.svg" alt="Processing">
+  <div id="waitnotify"></div>
+</div>
+<div id="download" class="download" hidden>
+  <h2 class="download__title title2" id="downloadTitle">Ready! Your file has been processed.</h2>
+  <div class="download__actions process-actions">
+    <a class="btn btn--red" id="downloadLink" href="#">Download</a>
+    <button type="button" class="btn btn--secondary" id="downloadStartOver">Process more</button>
   </div>
 </div>
 ${footer}
