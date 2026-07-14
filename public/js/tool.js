@@ -13,6 +13,10 @@
   var files = [];
   var downloadUrl = null;
 
+  // Vercel serverless request body limit is ~4.5MB. Prefer browser processing
+  // for pdf-lib tools so large merges never hit 413.
+  var SERVER_PAYLOAD_LIMIT = 3.5 * 1024 * 1024;
+
   var modeSelect = document.getElementById("opt-mode");
   if (modeSelect) {
     modeSelect.addEventListener("change", function () {
@@ -74,6 +78,12 @@
       files.push(f);
     });
     renderFiles();
+  }
+
+  function totalSize() {
+    return files.reduce(function (sum, f) {
+      return sum + (f.size || 0);
+    }, 0);
   }
 
   function formatSize(n) {
@@ -217,6 +227,68 @@
     }
   }
 
+  function shouldUseClient(opts) {
+    if (!window.ClientPDF || !ClientPDF.canProcessClient(toolPath)) return false;
+    // Always use client for merge/split/etc to avoid Vercel 413 limits
+    return true;
+  }
+
+  async function processOnClient(opts) {
+    showProcessing("Processing in your browser...");
+    var result = await ClientPDF.process(toolPath, files, opts);
+    var url = URL.createObjectURL(result.blob);
+    showDone(result.filename, url);
+  }
+
+  async function processOnServer(opts) {
+    var size = totalSize();
+    if (size > SERVER_PAYLOAD_LIMIT) {
+      if (window.ClientPDF && ClientPDF.canProcessClient(toolPath)) {
+        return processOnClient(opts);
+      }
+      throw new Error(
+        "Files are too large for server upload (max ~4MB total on this host). Try fewer/smaller files."
+      );
+    }
+
+    showProcessing("Uploading and processing...");
+    var form = new FormData();
+    form.append("tool", toolPath);
+    Object.keys(opts).forEach(function (key) {
+      form.append(key, opts[key]);
+    });
+    files.forEach(function (f) {
+      form.append("files", f, f.name);
+    });
+
+    var res = await fetch("/api/process", {
+      method: "POST",
+      body: form,
+    });
+
+    if (!res.ok) {
+      if (res.status === 413) {
+        if (window.ClientPDF && ClientPDF.canProcessClient(toolPath)) {
+          return processOnClient(opts);
+        }
+        throw new Error(
+          "Upload too large for the server (413). Try smaller files or fewer PDFs."
+        );
+      }
+      var errJson = null;
+      try {
+        errJson = await res.json();
+      } catch (e) {}
+      throw new Error((errJson && errJson.error) || "Processing failed (" + res.status + ")");
+    }
+
+    var disposition = res.headers.get("Content-Disposition") || "";
+    var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+    var filename = decodeURIComponent((match && (match[1] || match[2])) || "download.bin");
+    var blob = await res.blob();
+    showDone(filename, URL.createObjectURL(blob));
+  }
+
   async function runProcess() {
     if (!files.length && toolPath !== "/html-to-pdf") return;
 
@@ -233,44 +305,23 @@
       alert("Enter page ranges");
       return;
     }
-
-    showProcessing("Uploading and processing...");
+    if (toolPath === "/merge_pdf" && files.length < 2) {
+      alert("Please select at least 2 PDF files to merge");
+      return;
+    }
 
     try {
-      var form = new FormData();
-      form.append("tool", toolPath);
-      Object.keys(opts).forEach(function (key) {
-        form.append(key, opts[key]);
-      });
-      files.forEach(function (f) {
-        form.append("files", f, f.name);
-      });
-
-      var res = await fetch("/api/process", {
-        method: "POST",
-        body: form,
-      });
-
-      if (!res.ok) {
-        var errJson = null;
-        try {
-          errJson = await res.json();
-        } catch (e) {}
-        throw new Error((errJson && errJson.error) || "Processing failed (" + res.status + ")");
+      if (shouldUseClient(opts)) {
+        await processOnClient(opts);
+      } else {
+        await processOnServer(opts);
       }
-
-      var disposition = res.headers.get("Content-Disposition") || "";
-      var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
-      var filename = decodeURIComponent((match && (match[1] || match[2])) || "download.bin");
-      var blob = await res.blob();
-      var url = URL.createObjectURL(blob);
-      showDone(filename, url);
     } catch (err) {
       showError(err.message || String(err));
     }
   }
 
-  // HTML to PDF URL mode
+  // HTML to PDF URL mode (server-only)
   var urlForm = document.getElementById("urlForm");
   if (urlForm) {
     urlForm.addEventListener("submit", async function (e) {

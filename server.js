@@ -126,6 +126,9 @@ ${header}
   </div>
 </div>
 ${footer}
+<script src="/js/vendor/pdf-lib.min.js"></script>
+<script src="/js/vendor/jszip.min.js"></script>
+<script src="/js/client-pdf.js"></script>
 <script src="/js/main.js"></script>
 <script src="/js/tool.js"></script>
 </body>
