@@ -1,0 +1,34 @@
+{
+  "/login": [
+    "Login",
+    "Log in to your iLovePDF account."
+  ],
+  "/register": [
+    "Sign up",
+    "Create your free iLovePDF account."
+  ],
+  "/pricing": [
+    "Pricing",
+    "Get more with Premium \u2014 full access to iLovePDF tools and Desktop."
+  ],
+  "/desktop": [
+    "Desktop App",
+    "Work offline with Desktop. Batch edit and manage documents locally."
+  ],
+  "/mobile": [
+    "Mobile App",
+    "Your favorite tools, right in your pocket."
+  ],
+  "/business": [
+    "Business",
+    "Automate document management and scale with flexible plans."
+  ],
+  "/features": [
+    "Features",
+    "Everything you need to work with PDFs in one place."
+  ],
+  "/user/workflows": [
+    "Workflows",
+    "Create custom workflows with your favorite tools."
+  ]
+}

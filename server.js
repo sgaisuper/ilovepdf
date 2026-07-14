@@ -1,0 +1,229 @@
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const { URL } = require("url");
+
+const ROOT = path.join(__dirname, "public");
+const PORT = process.env.PORT || 3000;
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ico": "image/x-icon",
+};
+
+const tools = JSON.parse(
+  fs.readFileSync(path.join(ROOT, "data", "tools.json"), "utf8")
+);
+const toolsByPath = Object.fromEntries(tools.map((t) => [t.path, t]));
+
+const stubs = JSON.parse(
+  fs.readFileSync(path.join(ROOT, "data", "stubs.json"), "utf8")
+);
+
+const header = fs.readFileSync(
+  path.join(ROOT, "partials", "header.html"),
+  "utf8"
+);
+const footer = fs.readFileSync(
+  path.join(ROOT, "partials", "footer-simple.html"),
+  "utf8"
+);
+
+function renderToolPage(tool) {
+  const isHtml = tool.path === "/html-to-pdf";
+  const uploaderInner = isHtml
+    ? `
+      <form class="url-form" id="urlForm">
+        <input id="urlInput" type="url" placeholder="https://example.com" required />
+        <button class="btn" type="submit">${escapeHtml(tool.btn)}</button>
+      </form>
+      <div class="uploader__droptxt">${escapeHtml(tool.drop)}</div>`
+    : `
+      <a class="uploader__btn tooltip--left" id="pickfiles" href="javascript:;" title="Add more files">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" stroke-linecap="round" stroke-width="2" stroke="#fff" fill="none" stroke-linejoin="round"><path d="M10 1.833v16.333"/><path d="M1.833 10h16.333"/></svg>
+        <span>${escapeHtml(tool.btn)}</span>
+      </a>
+      <div class="uploader__extra">
+        <a class="btn-icon uploader__extra__btn tooltip tooltip--right active" id="uploadDisk" href="javascript:;" title="Upload from your computer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="19" viewBox="0 0 20 19" fill="#fff" fill-rule="nonzero"><path d="M4.8 19c-.442 0-.8-.448-.8-1s.358-1 .8-1h10.4c.442 0 .8.448.8 1s-.358 1-.8 1H4.8z"/><path d="M7 15h6l-1 3H8z"/><path d="M2 2v11h16V2H2zM1 0h18a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V1a1 1 0 0 1 1-1z"/></svg>
+        </a>
+        <a class="btn-icon uploader__extra__btn tooltip tooltip--right active" title="Select from Google Drive" href="javascript:;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="16" viewBox="0 0 18 16"><path fill="#FFF" d="M8.7375,5.80725 L3.021,15.70725 L0.12375,10.69725 L5.847,0.795 L8.7375,5.80725 Z M17.865,10.38225 L12.078,10.39125 L6.378,0.489 L12.1725,0.489 L17.865,10.38225 Z M17.87625,10.9875 L14.9865,15.9975 L3.5415,15.99 L6.43425,10.98375 L17.87625,10.9875 Z"/></svg>
+        </a>
+        <a class="btn-icon uploader__extra__btn tooltip tooltip--right active" title="Select from Dropbox" href="javascript:;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path fill="#FFF" d="M5.3475,0.7035 L0.096,4.125 L3.708,7.03725 L9.018,3.765 L5.3475,0.7035 Z M17.904,4.14 L12.66525,0.7275 L9.01875,3.7725 L14.29875,7.03875 L17.904,4.14 Z M9.01875,10.305 L12.66525,13.35975 L17.904,9.945 L14.2995,7.0395 L9.01875,10.305 Z M0.096,9.9585 L5.3475,13.35975 L9.01875,10.305 L3.70875,7.0455 L0.096,9.9585 Z M9.01875,10.9635 L5.35575,14.0385 L3.786,13.02 L3.786,14.16 L9.01875,17.30475 L14.271,14.15175 L14.271,13.0125 L12.693,14.031 L9.01875,10.9635 Z"/></svg>
+        </a>
+      </div>
+      <div class="uploader__droptxt">${escapeHtml(tool.drop)}</div>
+      <input type="file" id="fileInput" class="hidden" multiple accept="${escapeHtml(tool.accept)}" />`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(tool.page_title)} - iLovePDF</title>
+  <meta name="description" content="${escapeHtml(tool.desc)}"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
+  <link rel="preload" href="/font/Graphik-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" href="/font/Graphik-Semibold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" href="/font/Graphik-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+  <link rel="preload" href="/font/Graphik-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+  <link href="/dist/css/app.css" rel="stylesheet">
+  <link href="/css/clone-overrides.css" rel="stylesheet">
+  <style>
+    .header .ico, .nav-dropdown .ico, .menu .ico { display: block; }
+  </style>
+</head>
+<body class="lang-en-US tool-page">
+${header}
+<div class="main">
+  <div class="tool tool--small">
+    <div class="tool__workarea" id="workArea">
+      <div id="dropArea"></div>
+      <div class="tool__header">
+        <h1 class="tool__header__title">${escapeHtml(tool.page_title)}</h1>
+        <h2 class="tool__header__subtitle">${escapeHtml(tool.desc)}</h2>
+      </div>
+      <div class="uploading__bar uploading__bar--small">
+        <span class="uploading__bar__completed"></span>
+      </div>
+      <div id="uploader" class="uploader">
+        ${uploaderInner}
+      </div>
+      <div id="fileList" class="file-list hidden"></div>
+      <div id="process" class="process">
+        <p id="processText" class="processAction title2">${escapeHtml(tool.process)}</p>
+        <img src="/img/svg_icons/preload.svg" alt="Processing">
+      </div>
+    </div>
+  </div>
+</div>
+${footer}
+<script src="/js/main.js"></script>
+<script src="/js/tool.js"></script>
+</body>
+</html>`;
+}
+
+function renderStubPage(title, subtitle) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(title)} - iLovePDF</title>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
+  <link href="/dist/css/web.css" rel="stylesheet">
+  <link href="/css/clone-overrides.css" rel="stylesheet">
+  <style>
+    .header .ico, .nav-dropdown .ico, .menu .ico { display: block; }
+    .stub { max-width: 720px; margin: 80px auto; padding: 48px 24px; text-align: center; }
+    .stub h1 { font-size: 36px; line-height: 44px; font-weight: 600; color: #33333b; margin-bottom: 12px; }
+    .stub p { font-size: 18px; line-height: 28px; color: #707078; margin-bottom: 32px; }
+    .stub .btn { margin-top: 0 !important; display: inline-flex; }
+  </style>
+</head>
+<body class="lang-en-US">
+${header}
+<div class="main">
+  <div class="stub">
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(subtitle)}</p>
+    <a class="btn" href="/">Explore PDF tools</a>
+  </div>
+</div>
+${footer}
+<script src="/js/main.js"></script>
+</body>
+</html>`;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function sendFile(res, filePath) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    res.end(data);
+  });
+}
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  let pathname = decodeURIComponent(url.pathname);
+
+  const cleanPath = pathname !== "/" ? pathname.replace(/\/$/, "") : pathname;
+
+  // Tool routes
+  if (toolsByPath[cleanPath]) {
+    const html = renderToolPage(toolsByPath[cleanPath]);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+    return;
+  }
+
+  // Marketing / account stubs
+  if (stubs[cleanPath]) {
+    const [title, subtitle] = stubs[cleanPath];
+    const html = renderStubPage(title, subtitle);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+    return;
+  }
+
+  // Static files
+  if (pathname === "/") pathname = "/index.html";
+  const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, "");
+  const filePath = path.join(ROOT, safePath);
+
+  if (!filePath.startsWith(ROOT)) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.stat(filePath, (err, stat) => {
+    if (!err && stat.isFile()) {
+      sendFile(res, filePath);
+      return;
+    }
+    // fallback: try as directory index
+    const indexPath = path.join(filePath, "index.html");
+    fs.stat(indexPath, (err2, stat2) => {
+      if (!err2 && stat2.isFile()) {
+        sendFile(res, indexPath);
+        return;
+      }
+      res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(
+        `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:48px;text-align:center"><h1>Page not found</h1><p><a href="/">Back to iLovePDF</a></p></body></html>`
+      );
+    });
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`iLovePDF clone running at http://localhost:${PORT}`);
+});
