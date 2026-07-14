@@ -2,158 +2,48 @@
   "use strict";
 
   var toolPath = document.body.getAttribute("data-tool") || location.pathname;
-  var uploader = document.getElementById("uploader");
-  var pickBtn = document.getElementById("pickfiles");
-  var fileInput = document.getElementById("fileInput");
-  var fileList = document.getElementById("fileList");
-  var processEl = document.getElementById("process");
-  var processText = document.getElementById("processText");
-  var workArea = document.getElementById("workArea");
-  var toolOptions = document.getElementById("toolOptions");
-  var files = [];
-  var downloadUrl = null;
+  var processLabel =
+    document.body.getAttribute("data-process-label") || "Process";
+  var processStatusText =
+    document.body.getAttribute("data-process-status") || "Processing...";
 
-  // Vercel serverless request body limit is ~4.5MB. Prefer browser processing
-  // for pdf-lib tools so large merges never hit 413.
+  // Vercel serverless body limit ~4.5MB. Prefer browser for pdf-lib tools.
   var SERVER_PAYLOAD_LIMIT = 3.5 * 1024 * 1024;
 
-  var modeSelect = document.getElementById("opt-mode");
-  if (modeSelect) {
-    modeSelect.addEventListener("change", function () {
-      var ranges = document.querySelector(".opt-ranges");
-      if (ranges) ranges.classList.toggle("hidden", modeSelect.value !== "range");
-    });
-  }
+  var files = [];
+  var fileIdSeq = 0;
+  var processing = false;
+  var downloadUrl = null;
 
-  if (pickBtn && fileInput) {
-    pickBtn.addEventListener("click", function (e) {
-      e.preventDefault();
-      fileInput.click();
-    });
-  }
-
+  var workArea = document.getElementById("workArea");
+  var uploader = document.getElementById("uploader");
+  var pickBtn = document.getElementById("pickfiles");
   var diskBtn = document.getElementById("uploadDisk");
-  if (diskBtn && fileInput) {
-    diskBtn.addEventListener("click", function (e) {
-      e.preventDefault();
-      fileInput.click();
-    });
-  }
+  var fileInput = document.getElementById("fileInput");
+  var fileGroups = document.getElementById("fileGroups");
+  var sidebar = document.getElementById("sidebar");
+  var toolOptions = document.getElementById("toolOptions");
+  var processTask = document.getElementById("processTask");
+  var processTaskText = document.getElementById("processTaskTextBtn");
+  var processTaskWrapper = document.getElementById("processTaskWrapper");
+  var uploadingEl = document.getElementById("uploading");
+  var processEl = document.getElementById("process");
+  var processText = document.getElementById("processText");
+  var downloadEl = document.getElementById("download");
+  var downloadLink = document.getElementById("downloadLink");
+  var downloadStartOver = document.getElementById("downloadStartOver");
+  var uploadCurrent = document.getElementById("uploadCurrent");
+  var uploadTotal = document.getElementById("uploadTotal");
+  var uploadFileName = document.getElementById("uploadFileName");
+  var uploadPercent = document.getElementById("uploadPercent");
+  var uploadBarFill = document.getElementById("uploadBarFill");
+  var topUploadBar = document.getElementById("topUploadBar");
+  var topUploadBarFill = document.getElementById("topUploadBarFill");
+  var timeLeft = document.getElementById("timeLeft");
+  var uploadSpeed = document.getElementById("uploadSpeed");
 
-  if (fileInput) {
-    fileInput.addEventListener("change", function () {
-      addFiles(Array.prototype.slice.call(fileInput.files || []));
-      fileInput.value = "";
-    });
-  }
-
-  function prevent(e) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-
-  ["dragenter", "dragover", "dragleave", "drop"].forEach(function (ev) {
-    document.addEventListener(ev, prevent, false);
-  });
-
-  ["dragenter", "dragover"].forEach(function (ev) {
-    document.body.addEventListener(ev, function () {
-      document.body.classList.add("is-dragover");
-    });
-  });
-
-  ["dragleave", "drop"].forEach(function (ev) {
-    document.body.addEventListener(ev, function () {
-      document.body.classList.remove("is-dragover");
-    });
-  });
-
-  document.addEventListener("drop", function (e) {
-    var dropped = e.dataTransfer && e.dataTransfer.files;
-    if (dropped && dropped.length) addFiles(Array.prototype.slice.call(dropped));
-  });
-
-  function addFiles(list) {
-    list.forEach(function (f) {
-      files.push(f);
-    });
-    renderFiles();
-  }
-
-  function totalSize() {
-    return files.reduce(function (sum, f) {
-      return sum + (f.size || 0);
-    }, 0);
-  }
-
-  function formatSize(n) {
-    if (n < 1024) return n + " B";
-    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-    return (n / (1024 * 1024)).toFixed(1) + " MB";
-  }
-
-  function collectOptions() {
-    var opts = {};
-    if (!toolOptions) return opts;
-    toolOptions.querySelectorAll("input, select, textarea").forEach(function (el) {
-      if (!el.name) return;
-      opts[el.name] = el.value;
-    });
-    return opts;
-  }
-
-  function renderFiles() {
-    if (!fileList) return;
-    if (!files.length) {
-      fileList.innerHTML = "";
-      fileList.classList.add("hidden");
-      if (uploader) uploader.classList.remove("uploader--has-files");
-      return;
-    }
-
-    fileList.classList.remove("hidden");
-    if (uploader) uploader.classList.add("uploader--has-files");
-
-    fileList.innerHTML =
-      '<div class="file-list__items">' +
-      files
-        .map(function (f, i) {
-          var ext = (f.name.split(".").pop() || "PDF").toUpperCase().slice(0, 4);
-          return (
-            '<div class="file-list__item" data-index="' +
-            i +
-            '">' +
-            '<div class="file-list__icon">' +
-            escapeHtml(ext) +
-            "</div>" +
-            '<div class="file-list__meta">' +
-            '<div class="file-list__name">' +
-            escapeHtml(f.name) +
-            "</div>" +
-            '<div class="file-list__size">' +
-            formatSize(f.size) +
-            "</div>" +
-            "</div>" +
-            '<button type="button" class="file-list__remove" data-remove="' +
-            i +
-            '" aria-label="Remove">&times;</button>' +
-            "</div>"
-          );
-        })
-        .join("") +
-      "</div>" +
-      '<button type="button" class="btn btn--process" id="processBtn">Process</button>';
-
-    fileList.querySelectorAll("[data-remove]").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        files.splice(Number(btn.getAttribute("data-remove")), 1);
-        renderFiles();
-      });
-    });
-
-    var processBtn = document.getElementById("processBtn");
-    if (processBtn) processBtn.addEventListener("click", runProcess);
-  }
+  var SVG_REMOVE =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><polygon fill="#47474F" fill-rule="evenodd" points="12 1.208 10.79 0 6 4.792 1.21 0 0 1.208 4.79 6 0 10.792 1.21 12 6 7.208 10.79 12 12 10.792 7.21 6"/></svg>';
 
   function escapeHtml(s) {
     return String(s)
@@ -163,33 +53,291 @@
       .replace(/"/g, "&quot;");
   }
 
-  function showProcessing(message) {
-    if (uploader) uploader.style.display = "none";
-    if (fileList) fileList.style.display = "none";
-    if (toolOptions) toolOptions.style.display = "none";
-    if (workArea) {
-      var header = workArea.querySelector(".tool__header");
-      if (header) header.style.display = "none";
+  function formatSize(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function totalSize() {
+    return files.reduce(function (sum, item) {
+      return sum + (item.file.size || 0);
+    }, 0);
+  }
+
+  function markActiveNav() {
+    var path = location.pathname.replace(/\/$/, "") || "/";
+    document.querySelectorAll("header a[href]").forEach(function (a) {
+      var href = (a.getAttribute("href") || "").replace(/\/$/, "");
+      if (!href || href === "#") return;
+      if (href === path) {
+        a.classList.add("active");
+        var li = a.closest("li");
+        if (li) li.classList.add("active");
+      }
+    });
+  }
+
+  function collectOptions() {
+    var opts = {};
+    if (!toolOptions) return opts;
+    toolOptions.querySelectorAll("input, select, textarea").forEach(function (el) {
+      if (!el.name) return;
+      if (el.type === "checkbox") {
+        opts[el.name] = el.checked;
+        return;
+      }
+      if (el.type === "radio") {
+        if (el.checked) opts[el.name] = el.value;
+        return;
+      }
+      opts[el.name] = el.value;
+    });
+    return opts;
+  }
+
+  function shouldUseClient() {
+    if (!window.ClientPDF || !window.ClientPDF.canProcessClient(toolPath)) {
+      return false;
     }
+    // Always client for supported tools — avoids Vercel 413 on large merges
+    return true;
+  }
+
+  function syncWorkspace() {
+    var has = files.length > 0;
+    document.body.classList.toggle("sidebar-active", has && !processing);
+    document.body.classList.toggle("first-file-ready", has);
+
+    if (uploader) uploader.style.display = has ? "none" : "";
+    if (fileGroups) {
+      fileGroups.style.display = has ? "flex" : "none";
+      fileGroups.classList.toggle("active", has);
+    }
+    if (sidebar) {
+      sidebar.style.display = has ? "flex" : "";
+    }
+    if (processTask) {
+      var enable = has && !processing;
+      if (toolPath === "/merge_pdf") enable = files.length >= 2 && !processing;
+      processTask.style.display = enable || (has && !processing) ? "flex" : "none";
+      if (has && !processing) processTask.style.display = "flex";
+      else processTask.style.display = "none";
+      processTask.disabled = !enable;
+      processTask.classList.toggle("disabled", !enable);
+    }
+    if (processTaskText) processTaskText.textContent = processLabel;
+    if (processTaskWrapper) {
+      processTaskWrapper.style.display = has && !processing ? "block" : "none";
+    }
+  }
+
+  function renderFiles() {
+    if (!fileGroups) return;
+    if (!files.length) {
+      fileGroups.innerHTML = "";
+      syncWorkspace();
+      return;
+    }
+
+    var listHtml = files
+      .map(function (item, index) {
+        var ext = (item.file.name.split(".").pop() || "pdf").toUpperCase();
+        var icon =
+          ext === "PDF"
+            ? "/img/filetype/pdf.svg"
+            : ext === "DOC" || ext === "DOCX"
+              ? "/img/filetype/word.svg"
+              : "/img/filetype/pdf.svg";
+        return (
+          '<div class="file file--' +
+          escapeHtml(toolPath.replace(/^\//, "")) +
+          ' ui-sortable-handle" id="' +
+          item.id +
+          '" data-index="' +
+          index +
+          '" data-size="' +
+          item.file.size +
+          '" data-extension="' +
+          escapeHtml(ext) +
+          '" draggable="true">' +
+          '<div class="file__actions">' +
+          '<a class="file__btn remove tooltip--top tooltip" href="javascript:;" title="Delete" data-remove="' +
+          item.id +
+          '">' +
+          SVG_REMOVE +
+          "</a>" +
+          "</div>" +
+          '<div class="file__canvas">' +
+          '<img src="' +
+          icon +
+          '" alt="" width="54" height="64" draggable="false">' +
+          "</div>" +
+          '<div class="file__info">' +
+          '<span class="file__info__name" title="' +
+          escapeHtml(item.file.name) +
+          '">' +
+          escapeHtml(item.file.name) +
+          "</span>" +
+          "</div>" +
+          '<div class="tool--dropable"></div>' +
+          "</div>"
+        );
+      })
+      .join("");
+
+    fileGroups.innerHTML =
+      '<div id="filesGroup0" class="tool__workarea__group active">' +
+      '<div class="tool__workarea__files ui-sortable" id="filesList">' +
+      listHtml +
+      '<div class="file file--add">' +
+      '<button type="button" class="file__add" id="addMoreFilesBtn">' +
+      '<span class="file__add__plus">+</span>' +
+      "<span>Add more files</span>" +
+      "</button>" +
+      "</div>" +
+      "</div></div>";
+
+    fileGroups.querySelectorAll("[data-remove]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var id = btn.getAttribute("data-remove");
+        files = files.filter(function (f) {
+          return f.id !== id;
+        });
+        renderFiles();
+      });
+    });
+
+    var addMore = document.getElementById("addMoreFilesBtn");
+    if (addMore && fileInput) {
+      addMore.addEventListener("click", function () {
+        fileInput.click();
+      });
+    }
+
+    bindSortable();
+    syncWorkspace();
+  }
+
+  function bindSortable() {
+    var list = document.getElementById("filesList");
+    if (!list) return;
+    var cards = list.querySelectorAll(".file:not(.file--add)");
+    cards.forEach(function (el) {
+      el.addEventListener("dragstart", function (e) {
+        el.classList.add("file--dragging");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", el.getAttribute("data-index"));
+      });
+      el.addEventListener("dragend", function () {
+        el.classList.remove("file--dragging");
+        list.querySelectorAll(".file--drag-over").forEach(function (n) {
+          n.classList.remove("file--drag-over");
+        });
+      });
+      el.addEventListener("dragover", function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        el.classList.add("file--drag-over");
+      });
+      el.addEventListener("dragleave", function () {
+        el.classList.remove("file--drag-over");
+      });
+      el.addEventListener("drop", function (e) {
+        e.preventDefault();
+        el.classList.remove("file--drag-over");
+        var from = parseInt(e.dataTransfer.getData("text/plain"), 10);
+        var to = parseInt(el.getAttribute("data-index"), 10);
+        if (isNaN(from) || isNaN(to) || from === to) return;
+        var moved = files.splice(from, 1)[0];
+        files.splice(to, 0, moved);
+        renderFiles();
+      });
+    });
+  }
+
+  function addFiles(list) {
+    list.forEach(function (f) {
+      files.push({ id: "file-" + ++fileIdSeq, file: f });
+    });
+    hideOverlays();
+    renderFiles();
+  }
+
+  function hideOverlays() {
+    document.body.classList.remove("process-run", "upload-run");
+    if (uploadingEl) uploadingEl.style.display = "none";
+    if (processEl) {
+      processEl.style.display = "none";
+      processEl.classList.remove("active", "process--error", "process--done");
+    }
+    if (downloadEl) downloadEl.hidden = true;
+    if (workArea) workArea.style.display = "";
+    var toolRoot = document.querySelector(".tool");
+    if (toolRoot) toolRoot.style.display = "";
+  }
+
+  function showUploading() {
+    document.body.classList.add("process-run", "upload-run");
+    if (workArea) workArea.style.display = "none";
+    var toolRoot = document.querySelector(".tool");
+    if (toolRoot) toolRoot.style.display = "none";
+    if (processTask) processTask.style.display = "none";
+    if (processEl) processEl.style.display = "none";
+    if (downloadEl) downloadEl.hidden = true;
+    if (uploadingEl) uploadingEl.style.display = "flex";
+    if (uploadTotal) uploadTotal.textContent = String(files.length);
+    if (topUploadBar) topUploadBar.style.display = "block";
+  }
+
+  function setUploadProgress(pct, currentIdx, name) {
+    pct = Math.max(0, Math.min(100, Math.round(pct)));
+    if (uploadPercent) uploadPercent.textContent = pct + "%";
+    if (uploadBarFill) uploadBarFill.style.width = pct + "%";
+    if (topUploadBarFill) topUploadBarFill.style.width = pct + "%";
+    if (uploadCurrent) uploadCurrent.textContent = String(currentIdx);
+    if (uploadFileName) uploadFileName.textContent = name || "";
+    if (uploadSpeed) uploadSpeed.textContent = (1.2 + pct / 80).toFixed(1) + " MB/S";
+    if (timeLeft) {
+      var left = Math.max(1, Math.round((100 - pct) / 18));
+      timeLeft.textContent = left + " seconds";
+    }
+  }
+
+  function showProcessing(message) {
+    document.body.classList.add("process-run");
+    document.body.classList.remove("upload-run");
+    if (uploadingEl) uploadingEl.style.display = "none";
+    if (downloadEl) downloadEl.hidden = true;
+    if (workArea) workArea.style.display = "none";
+    var toolRoot = document.querySelector(".tool");
+    if (toolRoot) toolRoot.style.display = "none";
+    if (processTask) processTask.style.display = "none";
     if (processEl) {
       processEl.style.display = "flex";
       processEl.classList.add("active");
       processEl.classList.remove("process--error", "process--done");
-      var oldActions = processEl.querySelector(".process-actions");
-      if (oldActions) oldActions.remove();
       var img = processEl.querySelector("img");
       if (img) img.style.display = "";
     }
-    if (processText) processText.textContent = message || "Processing...";
+    if (processText) processText.textContent = message || processStatusText;
   }
 
   function showError(message) {
-    if (processText) processText.textContent = message || "Something went wrong";
+    document.body.classList.add("process-run");
+    if (uploadingEl) uploadingEl.style.display = "none";
     if (processEl) {
-      processEl.classList.add("process--error");
+      processEl.style.display = "flex";
+      processEl.classList.add("active", "process--error");
       var img = processEl.querySelector("img");
       if (img) img.style.display = "none";
-      var actions = document.createElement("div");
+    }
+    if (processText) processText.textContent = message || "Something went wrong";
+    var actions = processEl && processEl.querySelector(".process-actions");
+    if (processEl && !actions) {
+      actions = document.createElement("div");
       actions.className = "process-actions";
       actions.innerHTML =
         '<button type="button" class="btn" id="resetTool">Try again</button>' +
@@ -201,155 +349,192 @@
     }
   }
 
-  function showDone(filename, blobUrl) {
+  function showDownload(blob, filename) {
+    document.body.classList.add("process-run");
+    document.body.classList.remove("upload-run");
+    if (uploadingEl) uploadingEl.style.display = "none";
+    if (processEl) processEl.style.display = "none";
+    if (workArea) workArea.style.display = "none";
+    var toolRoot = document.querySelector(".tool");
+    if (toolRoot) toolRoot.style.display = "none";
+    if (processTask) processTask.style.display = "none";
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-    downloadUrl = blobUrl;
-    if (processText) processText.textContent = "Ready! Your file has been processed.";
-    if (processEl) {
-      processEl.classList.add("process--done");
-      var img = processEl.querySelector("img");
-      if (img) img.style.display = "none";
-      var actions = document.createElement("div");
-      actions.className = "process-actions";
-      actions.innerHTML =
-        '<a class="btn" id="downloadBtn" download="' +
-        escapeHtml(filename) +
-        '" href="' +
-        blobUrl +
-        '">Download ' +
-        escapeHtml(filename) +
-        "</a>" +
-        '<button type="button" class="btn btn--secondary" id="resetTool">Process more</button>';
-      processEl.appendChild(actions);
-      document.getElementById("resetTool").addEventListener("click", function () {
-        location.reload();
-      });
+    downloadUrl = URL.createObjectURL(blob);
+    if (downloadLink) {
+      downloadLink.href = downloadUrl;
+      downloadLink.download = filename;
+      downloadLink.textContent = "Download " + filename;
     }
+    if (downloadEl) downloadEl.hidden = false;
   }
 
-  function shouldUseClient(opts) {
-    if (!window.ClientPDF || !ClientPDF.canProcessClient(toolPath)) return false;
-    // Always use client for merge/split/etc to avoid Vercel 413 limits
-    return true;
-  }
+  function fakeUploadProgress() {
+    return new Promise(function (resolve) {
+      showUploading();
+      var bytes = totalSize();
+      var duration = Math.min(2000, Math.max(700, (bytes / (1024 * 1024)) * 450));
+      var started = Date.now();
+      var i = 0;
 
-  async function processOnClient(opts) {
-    showProcessing("Processing in your browser...");
-    var result = await ClientPDF.process(toolPath, files, opts);
-    var url = URL.createObjectURL(result.blob);
-    showDone(result.filename, url);
-  }
-
-  async function processOnServer(opts) {
-    var size = totalSize();
-    if (size > SERVER_PAYLOAD_LIMIT) {
-      if (window.ClientPDF && ClientPDF.canProcessClient(toolPath)) {
-        return processOnClient(opts);
+      function tick() {
+        var elapsed = Date.now() - started;
+        var pct = Math.min(99, (elapsed / duration) * 100);
+        var idx = Math.min(files.length, Math.max(1, Math.ceil((pct / 100) * files.length)));
+        var name = files[idx - 1] ? files[idx - 1].file.name : "";
+        setUploadProgress(pct, idx, name);
+        if (elapsed >= duration) {
+          setUploadProgress(100, files.length, files.length ? files[files.length - 1].file.name : "");
+          setTimeout(resolve, 150);
+          return;
+        }
+        i += 1;
+        requestAnimationFrame(tick);
       }
-      throw new Error(
-        "Files are too large for server upload (max ~4MB total on this host). Try fewer/smaller files."
-      );
-    }
+      requestAnimationFrame(tick);
+    });
+  }
 
-    showProcessing("Uploading and processing...");
+  async function runServerProcess(options) {
     var form = new FormData();
     form.append("tool", toolPath);
-    Object.keys(opts).forEach(function (key) {
-      form.append(key, opts[key]);
+    form.append("options", JSON.stringify(options));
+    Object.keys(options || {}).forEach(function (key) {
+      form.append(key, options[key]);
     });
-    files.forEach(function (f) {
-      form.append("files", f, f.name);
+    files.forEach(function (item) {
+      form.append("files", item.file, item.file.name);
     });
-
-    var res = await fetch("/api/process", {
-      method: "POST",
-      body: form,
-    });
-
+    var res = await fetch("/api/process", { method: "POST", body: form });
     if (!res.ok) {
-      if (res.status === 413) {
-        if (window.ClientPDF && ClientPDF.canProcessClient(toolPath)) {
-          return processOnClient(opts);
-        }
-        throw new Error(
-          "Upload too large for the server (413). Try smaller files or fewer PDFs."
-        );
-      }
       var errJson = null;
       try {
         errJson = await res.json();
       } catch (e) {}
+      if (res.status === 413) {
+        throw new Error(
+          "File too large for server upload (Vercel ~4.5MB limit). This tool needs a smaller file, or use a browser-side tool like Merge/Split/Rotate."
+        );
+      }
       throw new Error((errJson && errJson.error) || "Processing failed (" + res.status + ")");
     }
-
     var disposition = res.headers.get("Content-Disposition") || "";
     var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
     var filename = decodeURIComponent((match && (match[1] || match[2])) || "download.bin");
-    var blob = await res.blob();
-    showDone(filename, URL.createObjectURL(blob));
+    return { blob: await res.blob(), filename: filename };
   }
 
   async function runProcess() {
-    if (!files.length && toolPath !== "/html-to-pdf") return;
-
-    var opts = collectOptions();
-    if (toolPath === "/protect-pdf" && !opts.password) {
-      alert("Please set a password");
-      return;
-    }
-    if (toolPath === "/redact-pdf" && !opts.terms) {
-      alert("Enter words to redact");
-      return;
-    }
-    if (toolPath === "/split_pdf" && opts.mode === "range" && !opts.ranges) {
-      alert("Enter page ranges");
-      return;
-    }
+    if (processing || !files.length) return;
     if (toolPath === "/merge_pdf" && files.length < 2) {
-      alert("Please select at least 2 PDF files to merge");
+      showError("Please select at least 2 PDF files to merge");
       return;
     }
+
+    processing = true;
+    syncWorkspace();
 
     try {
-      if (shouldUseClient(opts)) {
-        await processOnClient(opts);
+      // Match production feel: upload progress UI first (client never sends large payloads)
+      await fakeUploadProgress();
+      showProcessing(processStatusText);
+
+      var options = collectOptions();
+      var result;
+
+      if (shouldUseClient()) {
+        result = await window.ClientPDF.process(
+          toolPath,
+          files.map(function (f) {
+            return f.file;
+          }),
+          options
+        );
       } else {
-        await processOnServer(opts);
+        if (totalSize() > SERVER_PAYLOAD_LIMIT) {
+          throw new Error(
+            "Combined upload exceeds Vercel’s ~4.5MB limit. Split files or use a client-side tool (Merge, Split, Rotate, Organize)."
+          );
+        }
+        result = await runServerProcess(options);
       }
+
+      showDownload(result.blob, result.filename);
     } catch (err) {
       showError(err.message || String(err));
+    } finally {
+      processing = false;
     }
   }
 
-  // HTML to PDF URL mode (server-only)
-  var urlForm = document.getElementById("urlForm");
-  if (urlForm) {
-    urlForm.addEventListener("submit", async function (e) {
+  // Wire pickers
+  if (pickBtn && fileInput) {
+    pickBtn.addEventListener("click", function (e) {
       e.preventDefault();
-      var input = document.getElementById("urlInput");
-      if (!input || !input.value.trim()) return;
-
-      showProcessing("Converting webpage to PDF...");
-      try {
-        var form = new FormData();
-        form.append("tool", "/html-to-pdf");
-        form.append("url", input.value.trim());
-        var res = await fetch("/api/process", { method: "POST", body: form });
-        if (!res.ok) {
-          var errJson = null;
-          try {
-            errJson = await res.json();
-          } catch (e2) {}
-          throw new Error((errJson && errJson.error) || "Conversion failed");
-        }
-        var disposition = res.headers.get("Content-Disposition") || "";
-        var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
-        var filename = decodeURIComponent((match && (match[1] || match[2])) || "webpage.pdf");
-        var blob = await res.blob();
-        showDone(filename, URL.createObjectURL(blob));
-      } catch (err) {
-        showError(err.message || String(err));
-      }
+      fileInput.click();
     });
   }
+  if (diskBtn && fileInput) {
+    diskBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      fileInput.click();
+    });
+  }
+  if (fileInput) {
+    fileInput.addEventListener("change", function () {
+      addFiles(Array.prototype.slice.call(fileInput.files || []));
+      fileInput.value = "";
+    });
+  }
+
+  var modeSelect = document.getElementById("opt-mode");
+  if (modeSelect) {
+    modeSelect.addEventListener("change", function () {
+      var ranges = document.querySelector(".opt-ranges");
+      if (ranges) ranges.classList.toggle("hidden", modeSelect.value !== "range");
+    });
+  }
+
+  function prevent(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  ["dragenter", "dragover", "dragleave", "drop"].forEach(function (ev) {
+    document.addEventListener(ev, prevent, false);
+  });
+  ["dragenter", "dragover"].forEach(function (ev) {
+    document.body.addEventListener(ev, function () {
+      document.body.classList.add("is-dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    document.body.addEventListener(ev, function () {
+      document.body.classList.remove("is-dragover");
+    });
+  });
+  document.addEventListener("drop", function (e) {
+    var dropped = e.dataTransfer && e.dataTransfer.files;
+    if (dropped && dropped.length) addFiles(Array.prototype.slice.call(dropped));
+  });
+
+  if (processTask) {
+    processTask.addEventListener("click", function (e) {
+      e.preventDefault();
+      runProcess();
+    });
+  }
+
+  if (downloadStartOver) {
+    downloadStartOver.addEventListener("click", function (e) {
+      e.preventDefault();
+      files = [];
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+      downloadUrl = null;
+      hideOverlays();
+      renderFiles();
+    });
+  }
+
+  markActiveNav();
+  syncWorkspace();
 })();
