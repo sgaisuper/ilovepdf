@@ -1,0 +1,91 @@
+[
+  {
+    "path": "/compress_pdf",
+    "name": "Compress PDF",
+    "category": "optimize",
+    "client": false,
+    "options": []
+  },
+  {
+    "path": "/merge_pdf",
+    "name": "Merge PDF",
+    "category": "organize",
+    "client": true,
+    "options": []
+  },
+  {
+    "path": "/split_pdf",
+    "name": "Split PDF",
+    "category": "organize",
+    "client": true,
+    "options": [{ "key": "mode", "label": "Mode", "type": "select", "values": ["pages", "range"], "default": "pages" }]
+  },
+  {
+    "path": "/rotate_pdf",
+    "name": "Rotate PDF",
+    "category": "edit",
+    "client": true,
+    "options": [{ "key": "angle", "label": "Angle", "type": "select", "values": ["90", "180", "270"], "default": "90" }]
+  },
+  {
+    "path": "/pdf_add_watermark",
+    "name": "Watermark",
+    "category": "edit",
+    "client": true,
+    "options": [
+      { "key": "text", "label": "Text", "type": "text", "default": "CONFIDENTIAL" },
+      { "key": "opacity", "label": "Opacity", "type": "number", "default": "0.25" }
+    ]
+  },
+  {
+    "path": "/add_pdf_page_number",
+    "name": "Page numbers",
+    "category": "edit",
+    "client": true,
+    "options": [
+      { "key": "position", "label": "Position", "type": "select", "values": ["bottom-center", "bottom-left", "bottom-right", "top-center"], "default": "bottom-center" }
+    ]
+  },
+  {
+    "path": "/crop-pdf",
+    "name": "Crop PDF",
+    "category": "edit",
+    "client": true,
+    "options": [{ "key": "margin", "label": "Margin", "type": "number", "default": "36" }]
+  },
+  {
+    "path": "/edit-pdf",
+    "name": "Edit PDF",
+    "category": "edit",
+    "client": true,
+    "options": [{ "key": "text", "label": "Text", "type": "text", "default": "Edited with iLovePDF" }]
+  },
+  {
+    "path": "/sign-pdf",
+    "name": "Sign PDF",
+    "category": "security",
+    "client": true,
+    "options": [{ "key": "name", "label": "Name", "type": "text", "default": "" }]
+  },
+  {
+    "path": "/protect-pdf",
+    "name": "Protect PDF",
+    "category": "security",
+    "client": false,
+    "options": [{ "key": "password", "label": "Password", "type": "password", "default": "" }]
+  },
+  {
+    "path": "/repair-pdf",
+    "name": "Repair PDF",
+    "category": "optimize",
+    "client": true,
+    "options": []
+  },
+  {
+    "path": "/organize-pdf",
+    "name": "Organize PDF",
+    "category": "organize",
+    "client": true,
+    "options": [{ "key": "order", "label": "Page order", "type": "text", "default": "" }]
+  }
+]

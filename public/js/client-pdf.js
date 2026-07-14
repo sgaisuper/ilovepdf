@@ -401,8 +401,91 @@
     }
   }
 
+  function blobToFile(blob, name) {
+    return new File([blob], name || "document.pdf", {
+      type: blob.type || "application/pdf",
+    });
+  }
+
+  async function processViaServer(toolPath, files, options) {
+    var form = new FormData();
+    form.append("tool", toolPath);
+    Object.keys(options || {}).forEach(function (key) {
+      form.append(key, options[key]);
+    });
+    files.forEach(function (f) {
+      form.append("files", f, f.name);
+    });
+    var res = await fetch("/api/process", { method: "POST", body: form });
+    if (!res.ok) {
+      var errJson = null;
+      try {
+        errJson = await res.json();
+      } catch (e) {}
+      if (res.status === 413) {
+        throw new Error(
+          "A workflow step upload was too large for the server. Use browser-only steps for large files."
+        );
+      }
+      throw new Error((errJson && errJson.error) || "Step failed (" + res.status + ")");
+    }
+    var disposition = res.headers.get("Content-Disposition") || "";
+    var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+    var filename = decodeURIComponent((match && (match[1] || match[2])) || "download.bin");
+    var blob = await res.blob();
+    return { blob: blob, filename: filename, contentType: blob.type };
+  }
+
+  async function runWorkflow(steps, files, onProgress) {
+    if (!steps || !steps.length) throw new Error("Add at least one step to the workflow");
+    if (!files || !files.length) throw new Error("Please select files to process");
+
+    var currentFiles = files.slice();
+    var lastResult = null;
+
+    for (var i = 0; i < steps.length; i++) {
+      var step = steps[i];
+      if (onProgress) {
+        onProgress({
+          index: i,
+          total: steps.length,
+          path: step.path,
+          name: step.name || step.path,
+        });
+      }
+
+      var result;
+      if (canProcessClient(step.path)) {
+        result = await process(step.path, currentFiles, step.options || {});
+      } else {
+        // Server step — may 413 on large files
+        result = await processViaServer(step.path, currentFiles, step.options || {});
+      }
+
+      lastResult = result;
+
+      // Feed next step: if zip, stop chaining (terminal step)
+      if ((result.contentType || "").indexOf("zip") >= 0 || /\.zip$/i.test(result.filename)) {
+        if (i < steps.length - 1) {
+          throw new Error(
+            "Step \"" +
+              (step.name || step.path) +
+              "\" produced a ZIP. Put it last in the workflow."
+          );
+        }
+        break;
+      }
+
+      currentFiles = [blobToFile(result.blob, result.filename)];
+    }
+
+    return lastResult;
+  }
+
   global.ClientPDF = {
     canProcessClient: canProcessClient,
     process: process,
+    runWorkflow: runWorkflow,
+    processViaServer: processViaServer,
   };
 })(window);

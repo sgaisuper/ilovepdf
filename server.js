@@ -36,6 +36,8 @@ const toolsByPath = Object.fromEntries(tools.map((t) => [t.path, t]));
 const stubs = JSON.parse(
   fs.readFileSync(path.join(ROOT, "data", "stubs.json"), "utf8")
 );
+// Workflows has a real page now
+delete stubs["/user/workflows"];
 
 const header = fs.readFileSync(
   path.join(ROOT, "partials", "header.html"),
@@ -168,6 +170,42 @@ ${footer}
 </html>`;
 }
 
+function renderWorkflowPage({ view, id }) {
+  const titles = {
+    list: "Workflows",
+    builder: id ? "Edit workflow" : "Create a workflow",
+    run: "Run workflow",
+  };
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(titles[view] || "Workflows")} - iLovePDF</title>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
+  <link rel="preload" href="/font/Graphik-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+  <link href="/dist/css/app.css" rel="stylesheet">
+  <link href="/css/clone-overrides.css" rel="stylesheet">
+  <style>.header .ico, .nav-dropdown .ico, .menu .ico { display: block; }</style>
+</head>
+<body class="lang-en-US tool-page" data-workflow-view="${escapeHtml(view)}" data-workflow-id="${escapeHtml(id || "")}">
+${header}
+<div class="main">
+  <div class="wf-page">
+    <div id="workflowApp"></div>
+  </div>
+</div>
+${footer}
+<script src="/js/vendor/pdf-lib.min.js"></script>
+<script src="/js/vendor/jszip.min.js"></script>
+<script src="/js/client-pdf.js"></script>
+<script src="/js/workflows-store.js"></script>
+<script src="/js/workflows-page.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>`;
+}
+
 function sendFile(res, filePath) {
   fs.readFile(filePath, (err, data) => {
     if (err) {
@@ -271,6 +309,30 @@ const server = http.createServer((req, res) => {
 
   if (cleanPath === "/api/process" && req.method === "POST") {
     handleProcess(req, res);
+    return;
+  }
+
+  // Workflows
+  if (req.method === "GET" && cleanPath === "/user/workflows") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderWorkflowPage({ view: "list" }));
+    return;
+  }
+  if (req.method === "GET" && cleanPath === "/user/workflows/new") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderWorkflowPage({ view: "builder" }));
+    return;
+  }
+  const wfEdit = cleanPath.match(/^\/user\/workflows\/([^/]+)$/);
+  if (req.method === "GET" && wfEdit) {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderWorkflowPage({ view: "builder", id: decodeURIComponent(wfEdit[1]) }));
+    return;
+  }
+  const wfRun = cleanPath.match(/^\/workflow\/([^/]+)$/);
+  if (req.method === "GET" && wfRun) {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderWorkflowPage({ view: "run", id: decodeURIComponent(wfRun[1]) }));
     return;
   }
 
