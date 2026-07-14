@@ -118,6 +118,52 @@ body.is-dragover .tool__workarea {
   margin-top: 16px;
 }
 
+.process--error #processText {
+  color: #e5322d;
+}
+
+.process--done #processText {
+  color: #1d9d58;
+}
+
+.tool-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  justify-content: center;
+  max-width: 720px;
+  margin: 0 auto 20px;
+  padding: 0 16px;
+}
+
+.tool-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #47474f;
+  text-align: left;
+  min-width: 180px;
+}
+
+.tool-options input,
+.tool-options select {
+  height: 40px;
+  border: 1px solid #d6d6df;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  color: #33333b;
+}
+
+.tool-options.hidden,
+.opt-ranges.hidden {
+  display: none !important;
+}
+
 .url-form {
   display: flex;
   gap: 12px;

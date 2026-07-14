@@ -2,9 +2,14 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
+const Busboy = require("busboy");
+const { processTool } = require("./lib/pdf-processor");
+const { optionsForTool } = require("./lib/tool-options");
 
 const ROOT = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
+const MAX_FILE_SIZE = 80 * 1024 * 1024; // 80MB per file
+const MAX_FILES = 40;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -19,6 +24,8 @@ const MIME = {
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".ico": "image/x-icon",
+  ".md": "text/markdown; charset=utf-8",
+  ".pdf": "application/pdf",
 };
 
 const tools = JSON.parse(
@@ -38,6 +45,14 @@ const footer = fs.readFileSync(
   path.join(ROOT, "partials", "footer-simple.html"),
   "utf8"
 );
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 function renderToolPage(tool) {
   const isHtml = tool.path === "/html-to-pdf";
@@ -85,7 +100,7 @@ function renderToolPage(tool) {
     .header .ico, .nav-dropdown .ico, .menu .ico { display: block; }
   </style>
 </head>
-<body class="lang-en-US tool-page">
+<body class="lang-en-US tool-page" data-tool="${escapeHtml(tool.path)}">
 ${header}
 <div class="main">
   <div class="tool tool--small">
@@ -95,6 +110,7 @@ ${header}
         <h1 class="tool__header__title">${escapeHtml(tool.page_title)}</h1>
         <h2 class="tool__header__subtitle">${escapeHtml(tool.desc)}</h2>
       </div>
+      ${optionsForTool(tool)}
       <div class="uploading__bar uploading__bar--small">
         <span class="uploading__bar__completed"></span>
       </div>
@@ -149,14 +165,6 @@ ${footer}
 </html>`;
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function sendFile(res, filePath) {
   fs.readFile(filePath, (err, data) => {
     if (err) {
@@ -165,27 +173,112 @@ function sendFile(res, filePath) {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": MIME[ext] || "application/octet-stream",
+    });
     res.end(data);
   });
+}
+
+function parseMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES },
+    });
+    const fields = {};
+    const files = [];
+    let settled = false;
+
+    busboy.on("field", (name, val) => {
+      fields[name] = val;
+    });
+
+    busboy.on("file", (name, file, info) => {
+      const chunks = [];
+      let limited = false;
+      file.on("data", (d) => chunks.push(d));
+      file.on("limit", () => {
+        limited = true;
+      });
+      file.on("end", () => {
+        if (limited) return;
+        const buffer = Buffer.concat(chunks);
+        if (!buffer.length) return;
+        files.push({
+          field: name,
+          filename: info.filename || "upload.bin",
+          mimeType: info.mimeType,
+          buffer,
+        });
+      });
+    });
+
+    busboy.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+
+    busboy.on("finish", () => {
+      if (!settled) {
+        settled = true;
+        resolve({ fields, files });
+      }
+    });
+
+    req.pipe(busboy);
+  });
+}
+
+function jsonError(res, status, message) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({ error: message }));
+}
+
+async function handleProcess(req, res) {
+  try {
+    const { fields, files } = await parseMultipart(req);
+    const tool = fields.tool;
+    if (!tool) {
+      jsonError(res, 400, "Missing tool");
+      return;
+    }
+
+    const result = await processTool(tool, files, fields);
+    const encoded = encodeURIComponent(result.filename).replace(/['()]/g, escape);
+    res.writeHead(200, {
+      "Content-Type": result.contentType || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${result.filename.replace(/"/g, "")}"; filename*=UTF-8''${encoded}`,
+      "Content-Length": result.buffer.length,
+      "Cache-Control": "no-store",
+    });
+    res.end(result.buffer);
+  } catch (err) {
+    console.error("[process]", err);
+    jsonError(res, err.status || 500, err.message || "Processing failed");
+  }
 }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let pathname = decodeURIComponent(url.pathname);
-
   const cleanPath = pathname !== "/" ? pathname.replace(/\/$/, "") : pathname;
 
-  // Tool routes
-  if (toolsByPath[cleanPath]) {
+  if (cleanPath === "/api/process" && req.method === "POST") {
+    handleProcess(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && toolsByPath[cleanPath]) {
     const html = renderToolPage(toolsByPath[cleanPath]);
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
     return;
   }
 
-  // Marketing / account stubs
-  if (stubs[cleanPath]) {
+  if (req.method === "GET" && stubs[cleanPath]) {
     const [title, subtitle] = stubs[cleanPath];
     const html = renderStubPage(title, subtitle);
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -193,7 +286,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Static files
   if (pathname === "/") pathname = "/index.html";
   const safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, "");
   const filePath = path.join(ROOT, safePath);
@@ -209,7 +301,6 @@ const server = http.createServer((req, res) => {
       sendFile(res, filePath);
       return;
     }
-    // fallback: try as directory index
     const indexPath = path.join(filePath, "index.html");
     fs.stat(indexPath, (err2, stat2) => {
       if (!err2 && stat2.isFile()) {

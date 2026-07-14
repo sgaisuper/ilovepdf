@@ -1,22 +1,35 @@
 # iLovePDF Clone
 
-A frontend visual clone of [ilovepdf.com](https://www.ilovepdf.com/) — homepage, tool grid, navigation, and tool upload pages.
+A working frontend + backend clone of [ilovepdf.com](https://www.ilovepdf.com/) with **real PDF processing**.
 
 ## Run
 
 ```bash
+npm install
 npm start
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## What's included
+## Real processing
 
-- Homepage with all PDF tools, category filters, and marketing sections
-- Tool pages for merge, split, compress, convert, edit, security, and AI tools
-- Original branding assets, Graphik fonts, icon sprite, and layout CSS
-- Client-side file pick / drag-and-drop UI (demo only — files are not uploaded or processed)
+Upload files on any tool page and download the result. Processing runs locally via `/api/process`.
 
-## Note
+| Tool | Engine |
+|------|--------|
+| Merge / Split / Rotate / Organize / Crop / Page numbers / Watermark / Edit / Sign | `pdf-lib` |
+| Compress / PDF/A | Ghostscript |
+| Protect / Unlock / Repair | `qpdf` |
+| PDF ↔ JPG / Scan to PDF | Poppler + Sharp |
+| Word / Excel / PowerPoint → PDF | LibreOffice |
+| PDF → Word / Excel / PowerPoint | LibreOffice with text/image fallbacks |
+| HTML to PDF | Puppeteer/Chrome |
+| OCR | Tesseract (+ Poppler) |
+| Markdown / Summarize / Compare / Redact / Translate | Poppler text extraction |
 
-This is an unofficial UI recreation for demonstration and learning. It is not affiliated with iLovePDF. Trademarks and design belong to their respective owners.
+## Notes
+
+- Unofficial demo recreation; not affiliated with iLovePDF.
+- Files are processed in temporary directories and are not stored permanently.
+- Max ~80MB per file, up to 40 files per request.
+- Translate / Summarizer use extractive local methods (no external AI API).
