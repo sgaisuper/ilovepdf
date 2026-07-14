@@ -466,6 +466,43 @@
     }
   }
 
+  // HTML to PDF: URL form (no file upload)
+  var urlForm = document.getElementById("urlForm");
+  var urlInput = document.getElementById("urlInput");
+  if (urlForm && urlInput && toolPath === "/html-to-pdf") {
+    urlForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var url = (urlInput.value || "").trim();
+      if (!url) return;
+      (async function () {
+        if (processing) return;
+        processing = true;
+        try {
+          showProcessing(processStatusText || "Converting HTML to PDF...");
+          var form = new FormData();
+          form.append("tool", toolPath);
+          form.append("url", url);
+          var res = await fetch("/api/process", { method: "POST", body: form });
+          if (!res.ok) {
+            var errJson = null;
+            try {
+              errJson = await res.json();
+            } catch (_) {}
+            throw new Error((errJson && errJson.error) || "Conversion failed (" + res.status + ")");
+          }
+          var disposition = res.headers.get("Content-Disposition") || "";
+          var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+          var filename = decodeURIComponent((match && (match[1] || match[2])) || "page.pdf");
+          showDownload(await res.blob(), filename);
+        } catch (err) {
+          showError(err.message || String(err));
+        } finally {
+          processing = false;
+        }
+      })();
+    });
+  }
+
   // Wire pickers
   if (pickBtn && fileInput) {
     pickBtn.addEventListener("click", function (e) {
