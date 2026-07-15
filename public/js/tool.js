@@ -563,32 +563,19 @@
     };
   }
 
-  async function uploadAllToBlob(fileList, statusPrefix) {
+  async function uploadAllToBlob(fileList) {
     var refs = [];
+    showUploading();
     for (var i = 0; i < fileList.length; i++) {
       var f = fileList[i];
-      showStatus(
-        (statusPrefix || "Uploading") +
-          " file " +
-          (i + 1) +
-          " of " +
-          fileList.length +
-          "…"
-      );
+      var idx = i + 1;
+      setUploadProgress(0, idx, f.name);
       refs.push(
         await uploadFileToBlob(f, function (pct) {
-          showStatus(
-            (statusPrefix || "Uploading") +
-              " file " +
-              (i + 1) +
-              " of " +
-              fileList.length +
-              "… " +
-              Math.round(pct) +
-              "%"
-          );
+          setUploadProgress(pct, idx, f.name);
         })
       );
+      setUploadProgress(100, idx, f.name);
     }
     return refs;
   }
@@ -599,8 +586,7 @@
       var refs = await uploadAllToBlob(
         files.map(function (item) {
           return item.file;
-        }),
-        "Uploading"
+        })
       );
       showProcessing(processStatusText);
       var res = await fetch("/api/process", {
