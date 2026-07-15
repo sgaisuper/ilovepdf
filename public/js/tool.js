@@ -426,7 +426,7 @@
       }
       if (fileLinkBox) fileLinkBox.hidden = false;
       if (sharePanel) sharePanel.hidden = true;
-      if (fileLinkStatus) fileLinkStatus.textContent = "Link ready — expires in 2 hours.";
+      if (fileLinkStatus) fileLinkStatus.textContent = "Link ready — active until cancelled.";
     } catch (err) {
       if (fileLinkStatus) fileLinkStatus.textContent = err.message || String(err);
     } finally {
