@@ -536,10 +536,9 @@
     if (!window.VercelBlobClient) {
       throw new Error("Blob uploader failed to load");
     }
-    var uploadFn =
-      (blobPresigned && window.VercelBlobClient.uploadPresigned) ||
-      window.VercelBlobClient.uploadPresigned ||
-      window.VercelBlobClient.upload;
+    var uploadFn = blobPresigned
+      ? window.VercelBlobClient.uploadPresigned
+      : window.VercelBlobClient.upload;
     if (!uploadFn) throw new Error("Blob upload method unavailable");
 
     var safeName = String(file.name || "upload.bin").replace(/[^\w.\-]+/g, "_");
