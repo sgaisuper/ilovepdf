@@ -190,7 +190,7 @@ ${header}
     <div class="file-link-box__meta">
       <img id="fileLinkQr" alt="QR code" width="140" height="140" />
       <div class="file-link-box__info">
-        <p>Link expires in <strong>2 hours</strong>.</p>
+        <p>Share this link — it stays active until you cancel it.</p>
         <p><a id="fileLinkTrack" href="#">Track downloads</a></p>
         <button type="button" class="btn btn--secondary btn--small" id="revokeFileLinkBtn">Cancel link</button>
         <p class="file-link-box__status" id="fileLinkStatus"></p>
@@ -294,11 +294,11 @@ ${header}
       <div class="link-track__stats">
         <div><strong id="statDownloads">${meta.downloads || 0}</strong><span>Downloads</span></div>
         <div><strong>${escapeHtml(formatWhen(meta.createdAt))}</strong><span>Created</span></div>
-        <div><strong>${escapeHtml(formatWhen(meta.expiresAt))}</strong><span>Expires</span></div>
         <div><strong>${escapeHtml(formatWhen(meta.lastDownloadAt))}</strong><span>Last download</span></div>
+        <div><strong>${meta.revoked ? "Cancelled" : "Active"}</strong><span>Status</span></div>
       </div>
       <p class="link-track__status ${expired ? "is-expired" : "is-live"}">${
-        meta.revoked ? "Link cancelled" : meta.expired ? "Link expired" : "Link active"
+        meta.revoked ? "Link cancelled" : "Link active"
       }</p>
       <div class="link-track__actions">
         ${
@@ -538,7 +538,7 @@ const server = http.createServer((req, res) => {
     const meta = getFileLink(id);
     if (!buffer || !meta || meta.expired) {
       res.writeHead(410, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(renderStubPage("Link expired", "This download link is no longer available."));
+      res.end(renderStubPage("Link unavailable", "This download link is no longer available."));
       return;
     }
     recordDownload(id, {
