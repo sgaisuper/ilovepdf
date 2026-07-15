@@ -24,5 +24,11 @@ There is no framework, no build step, and no database. See `README.md` for the t
   markdown/summarize/translate/compare/redact), LibreOffice `soffice` (Office↔PDF), and
   Tesseract (`tesseract-ocr`). Install the corresponding apt package only if you need to test
   that specific tool.
-- HTML→PDF uses `puppeteer-core`, which does NOT bundle Chrome. Provide a Chrome binary via
-  the `CHROME_PATH` env var (default hardcoded path in `lib/pdf-processor.js`) to use it.
+- HTML→PDF uses `puppeteer-core`, which does NOT bundle Chrome. It looks for Chrome at the
+  path in `CHROME_PATH`, defaulting to the hardcoded puppeteer cache path in
+  `lib/pdf-processor.js`. Install a matching build to that default path with
+  `npx @puppeteer/browsers install chrome@<version> --path /home/ubuntu/.cache/puppeteer`
+  (plus Chrome's shared libs, e.g. `libnss3`), or point `CHROME_PATH` at an existing Chrome.
+- Known pre-existing bug (not an environment issue): `/translate-pdf` fails with
+  `WinAnsi cannot encode "→"` because `translatePdf` in `lib/pdf-processor.js` draws a literal
+  `→` using `StandardFonts.Helvetica`. Every other tool works once the binaries above exist.
