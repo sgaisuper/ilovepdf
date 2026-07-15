@@ -17,12 +17,20 @@ const {
   revokeFileLink,
   publicMeta,
 } = require("./lib/file-links");
+const {
+  blobConfigured,
+  usePresignedUploads,
+  handleBlobClientUpload,
+  fetchBlobToFile,
+  MAX_BLOB_BYTES,
+  readJsonBody,
+} = require("./lib/blob");
 
 const ROOT = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
 const MAX_FILE_SIZE = 80 * 1024 * 1024; // 80MB per file
 const MAX_FILES = 40;
-const LINK_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4MB max
+const LINK_UPLOAD_LIMIT = 4 * 1024 * 1024; // multipart fallback only
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -74,6 +82,7 @@ function renderToolPage(tool) {
   const btnLabel = processLabel(tool);
   const statusLabel = processStatus(tool);
   const toolClass = "tool-" + String(tool.path).replace(/^\//, "").replace(/_/g, "");
+  const blobOn = blobConfigured();
   const uploaderInner = isHtml
     ? `
       <form class="url-form" id="urlForm">
@@ -118,7 +127,7 @@ function renderToolPage(tool) {
     .header .ico, .nav-dropdown .ico, .menu .ico { display: block; }
   </style>
 </head>
-<body class="lang-en-US tool-page ${escapeHtml(toolClass)}" data-tool="${escapeHtml(tool.path)}" data-process-label="${escapeHtml(btnLabel)}" data-process-status="${escapeHtml(statusLabel)}">
+<body class="lang-en-US tool-page ${escapeHtml(toolClass)}" data-tool="${escapeHtml(tool.path)}" data-process-label="${escapeHtml(btnLabel)}" data-process-status="${escapeHtml(statusLabel)}" data-blob-uploads="${blobOn ? "1" : "0"}" data-blob-presigned="${usePresignedUploads() ? "1" : "0"}" data-max-file-bytes="${blobOn ? MAX_BLOB_BYTES : 4 * 1024 * 1024}">
 ${header}
 <div class="main">
   <div class="tool tool--small">
@@ -201,6 +210,7 @@ ${header}
 ${footer}
 <script src="/js/vendor/pdf-lib.min.js"></script>
 <script src="/js/vendor/jszip.min.js"></script>
+<script src="/js/vendor/vercel-blob-client.js"></script>
 <script src="/js/client-pdf.js"></script>
 <script src="/js/main.js"></script>
 <script src="/js/tool.js"></script>
@@ -432,8 +442,54 @@ function jsonError(res, status, message) {
 
 async function handleProcess(req, res) {
   try {
-    const { fields, files } = await parseMultipart(req);
-    const tool = fields.tool;
+    const contentType = req.headers["content-type"] || "";
+    let tool;
+    let fields = {};
+    let files = [];
+
+    if (contentType.includes("application/json")) {
+      const body = await readJsonBody(req);
+      tool = body.tool;
+      fields = body.options || body.fields || {};
+      if (typeof fields === "string") {
+        try {
+          fields = JSON.parse(fields);
+        } catch (_) {
+          fields = {};
+        }
+      }
+      Object.assign(fields, body);
+      const refs = body.files || body.fileUrls || [];
+      for (const ref of refs) {
+        const url = typeof ref === "string" ? ref : ref.url;
+        const filename = typeof ref === "string" ? "upload.bin" : ref.filename || "upload.bin";
+        if (!url) continue;
+        files.push(await fetchBlobToFile(url, filename));
+      }
+    } else {
+      const parsed = await parseMultipart(req);
+      fields = parsed.fields;
+      files = parsed.files;
+      tool = fields.tool;
+      // Also allow fileUrl fields from multipart
+      if ((!files || !files.length) && fields.fileUrl) {
+        files = [await fetchBlobToFile(fields.fileUrl, fields.filename || "upload.bin")];
+      }
+      if (fields.fileUrls) {
+        try {
+          const urls = JSON.parse(fields.fileUrls);
+          for (const ref of urls) {
+            files.push(
+              await fetchBlobToFile(
+                typeof ref === "string" ? ref : ref.url,
+                typeof ref === "string" ? "upload.bin" : ref.filename || "upload.bin"
+              )
+            );
+          }
+        } catch (_) {}
+      }
+    }
+
     if (!tool) {
       jsonError(res, 400, "Missing tool");
       return;
@@ -456,22 +512,45 @@ async function handleProcess(req, res) {
 
 async function handleCreateFileLink(req, res) {
   try {
-    const { fields, files } = await parseMultipart(req);
-    const file = files[0];
-    if (!file) {
-      jsonError(res, 400, "Missing file");
-      return;
+    const contentType = req.headers["content-type"] || "";
+    let meta;
+
+    if (contentType.includes("application/json")) {
+      const body = await readJsonBody(req);
+      if (!body.url) {
+        jsonError(res, 400, "Missing blob url");
+        return;
+      }
+      meta = createFileLink({
+        blobUrl: body.url,
+        filename: body.filename || "download.bin",
+        contentType: body.contentType || "application/octet-stream",
+        tool: body.tool || "",
+        size: body.size || 0,
+      });
+    } else {
+      const { fields, files } = await parseMultipart(req);
+      const file = files[0];
+      if (!file) {
+        jsonError(res, 400, "Missing file");
+        return;
+      }
+      if (file.buffer.length > LINK_UPLOAD_LIMIT) {
+        jsonError(
+          res,
+          413,
+          "File too large for direct upload (max 4 MB). Use blob client upload instead."
+        );
+        return;
+      }
+      meta = createFileLink({
+        buffer: file.buffer,
+        filename: fields.filename || file.filename,
+        contentType: fields.contentType || file.mimeType,
+        tool: fields.tool || "",
+      });
     }
-    if (file.buffer.length > LINK_UPLOAD_LIMIT) {
-      jsonError(res, 413, "File too large (max 4 MB).");
-      return;
-    }
-    const meta = createFileLink({
-      buffer: file.buffer,
-      filename: fields.filename || file.filename,
-      contentType: fields.contentType || file.mimeType,
-      tool: fields.tool || "",
-    });
+
     const origin = `${req.headers["x-forwarded-proto"] || "http"}://${req.headers.host}`;
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(
@@ -494,6 +573,23 @@ const server = http.createServer((req, res) => {
 
   if (cleanPath === "/api/process" && req.method === "POST") {
     handleProcess(req, res);
+    return;
+  }
+
+  if (cleanPath === "/api/blob/upload" && req.method === "POST") {
+    handleBlobClientUpload(req, res);
+    return;
+  }
+
+  if (cleanPath === "/api/blob/status" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        enabled: blobConfigured(),
+        presigned: usePresignedUploads(),
+        maxFileBytes: blobConfigured() ? MAX_BLOB_BYTES : 4 * 1024 * 1024,
+      })
+    );
     return;
   }
 
@@ -530,25 +626,32 @@ const server = http.createServer((req, res) => {
   const downloadRoute = cleanPath.match(/^\/d\/([^/]+)$/);
   if (req.method === "GET" && downloadRoute) {
     const id = decodeURIComponent(downloadRoute[1]);
-    const buffer = readFileBuffer(id);
-    const meta = getFileLink(id);
-    if (!buffer || !meta || meta.expired) {
-      res.writeHead(410, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(renderStubPage("Link unavailable", "This download link is no longer available."));
-      return;
-    }
-    recordDownload(id, {
-      ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
-      ua: req.headers["user-agent"],
-    });
-    const encoded = encodeURIComponent(meta.filename).replace(/['()]/g, escape);
-    res.writeHead(200, {
-      "Content-Type": meta.contentType || "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${meta.filename.replace(/"/g, "")}"; filename*=UTF-8''${encoded}`,
-      "Content-Length": buffer.length,
-      "Cache-Control": "no-store",
-    });
-    res.end(buffer);
+    Promise.resolve()
+      .then(async () => {
+        const buffer = await readFileBuffer(id);
+        const meta = getFileLink(id);
+        if (!buffer || !meta || meta.expired) {
+          res.writeHead(410, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(renderStubPage("Link unavailable", "This download link is no longer available."));
+          return;
+        }
+        recordDownload(id, {
+          ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+          ua: req.headers["user-agent"],
+        });
+        const encoded = encodeURIComponent(meta.filename).replace(/['()]/g, escape);
+        res.writeHead(200, {
+          "Content-Type": meta.contentType || "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${meta.filename.replace(/"/g, "")}"; filename*=UTF-8''${encoded}`,
+          "Content-Length": buffer.length,
+          "Cache-Control": "no-store",
+        });
+        res.end(buffer);
+      })
+      .catch((err) => {
+        console.error("[download]", err);
+        jsonError(res, 500, err.message || "Download failed");
+      });
     return;
   }
 

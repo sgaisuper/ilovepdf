@@ -7,8 +7,17 @@
   var processStatusText =
     document.body.getAttribute("data-process-status") || "Processing...";
 
-  // Reject files over 4MB (Vercel payload constraint).
-  var MAX_FILE_BYTES = 4 * 1024 * 1024;
+  var blobUploads =
+    document.body.getAttribute("data-blob-uploads") === "1" ||
+    !!(window.VercelBlobClient && (window.VercelBlobClient.uploadPresigned || window.VercelBlobClient.upload));
+  var blobPresigned = document.body.getAttribute("data-blob-presigned") === "1";
+  var MAX_FILE_BYTES = parseInt(
+    document.body.getAttribute("data-max-file-bytes") || "",
+    10
+  );
+  if (!MAX_FILE_BYTES) {
+    MAX_FILE_BYTES = blobUploads ? 80 * 1024 * 1024 : 4 * 1024 * 1024;
+  }
   var SERVER_PAYLOAD_LIMIT = 4 * 1024 * 1024;
 
   var files = [];
@@ -289,9 +298,12 @@
       hideOverlays();
       renderFiles();
     }
-    if (rejected.length) {
+      if (rejected.length) {
+      var maxMb = Math.round(MAX_FILE_BYTES / (1024 * 1024));
       var msg =
-        "File too large (max 4 MB): " +
+        "File too large (max " +
+        maxMb +
+        " MB): " +
         rejected.join(", ") +
         ". Please choose a smaller file.";
       if (!accepted.length && !files.length) {
@@ -416,7 +428,9 @@
     if (lastResultBlob.size > MAX_FILE_BYTES) {
       if (fileLinkStatus) {
         fileLinkStatus.textContent =
-          "File too large (max 4 MB). Download the file instead of creating a share link.";
+          "File too large (max " +
+          Math.round(MAX_FILE_BYTES / (1024 * 1024)) +
+          " MB). Download the file instead of creating a share link.";
       }
       return;
     }
@@ -426,16 +440,47 @@
     }
     if (fileLinkStatus) fileLinkStatus.textContent = "";
     try {
-      var fd = new FormData();
-      fd.append("file", lastResultBlob, lastResultName || "download.bin");
-      fd.append("filename", lastResultName || "download.bin");
-      fd.append("contentType", lastResultType || "application/octet-stream");
-      fd.append("tool", toolPath);
-      var res = await fetch("/api/file-link", { method: "POST", body: fd });
-      var data = await res.json().catch(function () {
-        return {};
-      });
-      if (!res.ok) throw new Error(data.error || "Could not create link (" + res.status + ")");
+      var data;
+      if (blobUploads && window.VercelBlobClient) {
+        if (fileLinkStatus) fileLinkStatus.textContent = "Uploading to storage…";
+        var fileObj = new File(
+          [lastResultBlob],
+          lastResultName || "download.bin",
+          { type: lastResultType || "application/octet-stream" }
+        );
+        var uploaded = await uploadFileToBlob(fileObj);
+        var res = await fetch("/api/file-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: uploaded.url,
+            filename: lastResultName || "download.bin",
+            contentType: lastResultType || uploaded.contentType,
+            tool: toolPath,
+            size: lastResultBlob.size,
+          }),
+        });
+        data = await res.json().catch(function () {
+          return {};
+        });
+        if (!res.ok) throw new Error(data.error || "Could not create link (" + res.status + ")");
+      } else {
+        if (lastResultBlob.size > SERVER_PAYLOAD_LIMIT) {
+          throw new Error(
+            "File too large (max 4 MB) without blob storage. Download instead."
+          );
+        }
+        var fd = new FormData();
+        fd.append("file", lastResultBlob, lastResultName || "download.bin");
+        fd.append("filename", lastResultName || "download.bin");
+        fd.append("contentType", lastResultType || "application/octet-stream");
+        fd.append("tool", toolPath);
+        var res2 = await fetch("/api/file-link", { method: "POST", body: fd });
+        data = await res2.json().catch(function () {
+          return {};
+        });
+        if (!res2.ok) throw new Error(data.error || "Could not create link (" + res2.status + ")");
+      }
       activeLinkId = data.id;
       if (fileLinkInput) fileLinkInput.value = data.downloadUrl;
       if (fileLinkTrack) {
@@ -487,7 +532,101 @@
     });
   }
 
+  async function uploadFileToBlob(file, onProgress) {
+    if (!window.VercelBlobClient) {
+      throw new Error("Blob uploader failed to load");
+    }
+    var uploadFn =
+      (blobPresigned && window.VercelBlobClient.uploadPresigned) ||
+      window.VercelBlobClient.uploadPresigned ||
+      window.VercelBlobClient.upload;
+    if (!uploadFn) throw new Error("Blob upload method unavailable");
+
+    var safeName = String(file.name || "upload.bin").replace(/[^\w.\-]+/g, "_");
+    var pathname = "uploads/" + Date.now() + "-" + safeName;
+    var result = await uploadFn(pathname, file, {
+      access: "private",
+      handleUploadUrl: "/api/blob/upload",
+      multipart: file.size > 8 * 1024 * 1024,
+      contentType: file.type || "application/octet-stream",
+      onUploadProgress: function (p) {
+        if (onProgress) onProgress(p.percentage || 0);
+      },
+    });
+    return {
+      url: result.url,
+      downloadUrl: result.downloadUrl || result.url,
+      pathname: result.pathname,
+      contentType: result.contentType || file.type,
+      filename: file.name || safeName,
+      size: file.size,
+    };
+  }
+
+  async function uploadAllToBlob(fileList, statusPrefix) {
+    var refs = [];
+    for (var i = 0; i < fileList.length; i++) {
+      var f = fileList[i];
+      showStatus(
+        (statusPrefix || "Uploading") +
+          " file " +
+          (i + 1) +
+          " of " +
+          fileList.length +
+          "…"
+      );
+      refs.push(
+        await uploadFileToBlob(f, function (pct) {
+          showStatus(
+            (statusPrefix || "Uploading") +
+              " file " +
+              (i + 1) +
+              " of " +
+              fileList.length +
+              "… " +
+              Math.round(pct) +
+              "%"
+          );
+        })
+      );
+    }
+    return refs;
+  }
+
   async function runServerProcess(options) {
+    // Prefer direct-to-blob uploads so only URLs hit the Vercel function.
+    if (blobUploads && window.VercelBlobClient) {
+      var refs = await uploadAllToBlob(
+        files.map(function (item) {
+          return item.file;
+        }),
+        "Uploading"
+      );
+      showProcessing(processStatusText);
+      var res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool: toolPath,
+          options: options,
+          files: refs.map(function (r) {
+            return { url: r.url, filename: r.filename };
+          }),
+        }),
+      });
+      if (!res.ok) {
+        var errJson = null;
+        try {
+          errJson = await res.json();
+        } catch (e) {}
+        throw new Error((errJson && errJson.error) || "Processing failed (" + res.status + ")");
+      }
+      var disposition = res.headers.get("Content-Disposition") || "";
+      var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+      var filename = decodeURIComponent((match && (match[1] || match[2])) || "download.bin");
+      return { blob: await res.blob(), filename: filename };
+    }
+
     var form = new FormData();
     form.append("tool", toolPath);
     form.append("options", JSON.stringify(options));
@@ -497,21 +636,21 @@
     files.forEach(function (item) {
       form.append("files", item.file, item.file.name);
     });
-    var res = await fetch("/api/process", { method: "POST", body: form });
-    if (!res.ok) {
-      var errJson = null;
+    var res2 = await fetch("/api/process", { method: "POST", body: form });
+    if (!res2.ok) {
+      var errJson2 = null;
       try {
-        errJson = await res.json();
+        errJson2 = await res2.json();
       } catch (e) {}
-      if (res.status === 413) {
+      if (res2.status === 413) {
         throw new Error("File too large (max 4 MB). Please choose a smaller file.");
       }
-      throw new Error((errJson && errJson.error) || "Processing failed (" + res.status + ")");
+      throw new Error((errJson2 && errJson2.error) || "Processing failed (" + res2.status + ")");
     }
-    var disposition = res.headers.get("Content-Disposition") || "";
-    var match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
-    var filename = decodeURIComponent((match && (match[1] || match[2])) || "download.bin");
-    return { blob: await res.blob(), filename: filename };
+    var disposition2 = res2.headers.get("Content-Disposition") || "";
+    var match2 = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition2);
+    var filename2 = decodeURIComponent((match2 && (match2[1] || match2[2])) || "download.bin");
+    return { blob: await res2.blob(), filename: filename2 };
   }
 
   async function runProcess() {
@@ -541,7 +680,7 @@
           options
         );
       } else {
-        if (totalSize() > SERVER_PAYLOAD_LIMIT) {
+        if (!blobUploads && totalSize() > SERVER_PAYLOAD_LIMIT) {
           throw new Error(
             "Combined upload exceeds 4 MB. Please use fewer or smaller files."
           );
