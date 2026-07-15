@@ -32,6 +32,19 @@
   var downloadEl = document.getElementById("download");
   var downloadLink = document.getElementById("downloadLink");
   var downloadStartOver = document.getElementById("downloadStartOver");
+  var createFileLinkBtn = document.getElementById("createFileLinkBtn");
+  var fileLinkBox = document.getElementById("fileLinkBox");
+  var fileLinkInput = document.getElementById("fileLinkInput");
+  var copyFileLinkBtn = document.getElementById("copyFileLinkBtn");
+  var fileLinkQr = document.getElementById("fileLinkQr");
+  var fileLinkTrack = document.getElementById("fileLinkTrack");
+  var revokeFileLinkBtn = document.getElementById("revokeFileLinkBtn");
+  var fileLinkStatus = document.getElementById("fileLinkStatus");
+  var sharePanel = document.getElementById("sharePanel");
+  var lastResultBlob = null;
+  var lastResultName = null;
+  var lastResultType = null;
+  var activeLinkId = null;
   var uploadCurrent = document.getElementById("uploadCurrent");
   var uploadTotal = document.getElementById("uploadTotal");
   var uploadFileName = document.getElementById("uploadFileName");
@@ -360,12 +373,69 @@
     if (processTask) processTask.style.display = "none";
     if (downloadUrl) URL.revokeObjectURL(downloadUrl);
     downloadUrl = URL.createObjectURL(blob);
+    lastResultBlob = blob;
+    lastResultName = filename;
+    lastResultType = blob.type || "application/octet-stream";
+    activeLinkId = null;
+    if (fileLinkBox) fileLinkBox.hidden = true;
+    if (sharePanel) sharePanel.hidden = false;
+    if (fileLinkStatus) fileLinkStatus.textContent = "";
     if (downloadLink) {
       downloadLink.href = downloadUrl;
       downloadLink.download = filename;
       downloadLink.textContent = "Download " + filename;
     }
     if (downloadEl) downloadEl.hidden = false;
+  }
+
+  async function createShareLink() {
+    if (!lastResultBlob) return;
+    if (lastResultBlob.size > 3.5 * 1024 * 1024) {
+      if (fileLinkStatus) {
+        fileLinkStatus.textContent =
+          "File is too large to create a share link on this host (Vercel ~4.5MB limit). Download it instead.";
+      }
+      return;
+    }
+    if (createFileLinkBtn) {
+      createFileLinkBtn.disabled = true;
+      createFileLinkBtn.textContent = "Creating link…";
+    }
+    if (fileLinkStatus) fileLinkStatus.textContent = "";
+    try {
+      var fd = new FormData();
+      fd.append("file", lastResultBlob, lastResultName || "download.bin");
+      fd.append("filename", lastResultName || "download.bin");
+      fd.append("contentType", lastResultType || "application/octet-stream");
+      fd.append("tool", toolPath);
+      var res = await fetch("/api/file-link", { method: "POST", body: fd });
+      var data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) throw new Error(data.error || "Could not create link (" + res.status + ")");
+      activeLinkId = data.id;
+      if (fileLinkInput) fileLinkInput.value = data.downloadUrl;
+      if (fileLinkTrack) {
+        fileLinkTrack.href = data.trackUrl;
+        fileLinkTrack.textContent = "Track downloads (" + (data.downloads || 0) + ")";
+      }
+      if (fileLinkQr) {
+        fileLinkQr.src =
+          "https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=" +
+          encodeURIComponent(data.downloadUrl);
+      }
+      if (fileLinkBox) fileLinkBox.hidden = false;
+      if (sharePanel) sharePanel.hidden = true;
+      if (fileLinkStatus) fileLinkStatus.textContent = "Link ready — expires in 2 hours.";
+    } catch (err) {
+      if (fileLinkStatus) fileLinkStatus.textContent = err.message || String(err);
+    } finally {
+      if (createFileLinkBtn) {
+        createFileLinkBtn.disabled = false;
+        createFileLinkBtn.innerHTML =
+          '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Share download link or scan QR';
+      }
+    }
   }
 
   function fakeUploadProgress() {
@@ -567,8 +637,55 @@
       files = [];
       if (downloadUrl) URL.revokeObjectURL(downloadUrl);
       downloadUrl = null;
+      lastResultBlob = null;
+      lastResultName = null;
+      activeLinkId = null;
+      if (fileLinkBox) fileLinkBox.hidden = true;
       hideOverlays();
       renderFiles();
+    });
+  }
+
+  if (createFileLinkBtn) {
+    createFileLinkBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      createShareLink();
+    });
+  }
+
+  if (copyFileLinkBtn) {
+    copyFileLinkBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      if (!fileLinkInput || !fileLinkInput.value) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fileLinkInput.value).then(function () {
+          if (fileLinkStatus) fileLinkStatus.textContent = "Link copied.";
+        });
+      } else {
+        fileLinkInput.select();
+        document.execCommand("copy");
+        if (fileLinkStatus) fileLinkStatus.textContent = "Link copied.";
+      }
+    });
+  }
+
+  if (revokeFileLinkBtn) {
+    revokeFileLinkBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      if (!activeLinkId) return;
+      fetch("/api/file-link/" + encodeURIComponent(activeLinkId), { method: "DELETE" })
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function () {
+          activeLinkId = null;
+          if (fileLinkBox) fileLinkBox.hidden = true;
+          if (sharePanel) sharePanel.hidden = false;
+          if (fileLinkStatus) fileLinkStatus.textContent = "Link cancelled.";
+        })
+        .catch(function (err) {
+          if (fileLinkStatus) fileLinkStatus.textContent = err.message || String(err);
+        });
     });
   }
 

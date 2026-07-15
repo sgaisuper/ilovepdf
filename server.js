@@ -9,11 +9,20 @@ const {
   processLabel,
   processStatus,
 } = require("./lib/tool-options");
+const {
+  createFileLink,
+  getFileLink,
+  recordDownload,
+  readFileBuffer,
+  revokeFileLink,
+  publicMeta,
+} = require("./lib/file-links");
 
 const ROOT = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
 const MAX_FILE_SIZE = 80 * 1024 * 1024; // 80MB per file
 const MAX_FILES = 40;
+const LINK_UPLOAD_LIMIT = 3.5 * 1024 * 1024; // stay under Vercel ~4.5MB
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -167,6 +176,27 @@ ${header}
     <a class="btn btn--red" id="downloadLink" href="#">Download</a>
     <button type="button" class="btn btn--secondary" id="downloadStartOver">Process more</button>
   </div>
+  <div class="share" id="sharePanel">
+    <button type="button" class="share__link" id="createFileLinkBtn">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      Share download link or scan QR
+    </button>
+  </div>
+  <div class="file-link-box" id="fileLinkBox" hidden>
+    <div class="file-link-box__row">
+      <input type="text" id="fileLinkInput" readonly />
+      <button type="button" class="btn btn--secondary" id="copyFileLinkBtn">Copy</button>
+    </div>
+    <div class="file-link-box__meta">
+      <img id="fileLinkQr" alt="QR code" width="140" height="140" />
+      <div class="file-link-box__info">
+        <p>Link expires in <strong>2 hours</strong>.</p>
+        <p><a id="fileLinkTrack" href="#">Track downloads</a></p>
+        <button type="button" class="btn btn--secondary btn--small" id="revokeFileLinkBtn">Cancel link</button>
+        <p class="file-link-box__status" id="fileLinkStatus"></p>
+      </div>
+    </div>
+  </div>
 </div>
 ${footer}
 <script src="/js/vendor/pdf-lib.min.js"></script>
@@ -207,6 +237,87 @@ ${header}
 </div>
 ${footer}
 <script src="/js/main.js"></script>
+</body>
+</html>`;
+}
+
+function formatBytes(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
+function formatWhen(ts) {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return "—";
+  }
+}
+
+function renderLinkPage(meta) {
+  const expired = !meta || meta.expired || meta.revoked;
+  const downloadHref = meta ? `/d/${encodeURIComponent(meta.id)}` : "#";
+  const events = ((meta && meta.events) || [])
+    .slice()
+    .reverse()
+    .map(
+      (e) =>
+        `<li><span class="link-track__type">${escapeHtml(e.type)}</span><span class="link-track__at">${escapeHtml(formatWhen(e.at))}</span></li>`
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File link tracking - iLovePDF</title>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
+  <link href="/dist/css/app.css" rel="stylesheet">
+  <link href="/css/clone-overrides.css" rel="stylesheet">
+  <style>.header .ico, .nav-dropdown .ico, .menu .ico { display: block; }</style>
+</head>
+<body class="lang-en-US tool-page" data-link-id="${meta ? escapeHtml(meta.id) : ""}">
+${header}
+<div class="main">
+  <div class="link-track">
+    <h1>File link tracking</h1>
+    ${
+      !meta
+        ? `<p class="link-track__empty">This link was not found.</p>`
+        : `
+    <div class="link-track__card">
+      <h2>${escapeHtml(meta.filename)}</h2>
+      <p class="link-track__sub">${escapeHtml(formatBytes(meta.size || 0))} · ${escapeHtml(meta.tool || "PDF tool")}</p>
+      <div class="link-track__stats">
+        <div><strong id="statDownloads">${meta.downloads || 0}</strong><span>Downloads</span></div>
+        <div><strong>${escapeHtml(formatWhen(meta.createdAt))}</strong><span>Created</span></div>
+        <div><strong>${escapeHtml(formatWhen(meta.expiresAt))}</strong><span>Expires</span></div>
+        <div><strong>${escapeHtml(formatWhen(meta.lastDownloadAt))}</strong><span>Last download</span></div>
+      </div>
+      <p class="link-track__status ${expired ? "is-expired" : "is-live"}">${
+        meta.revoked ? "Link cancelled" : meta.expired ? "Link expired" : "Link active"
+      }</p>
+      <div class="link-track__actions">
+        ${
+          expired
+            ? ""
+            : `<a class="btn btn--red" href="${downloadHref}">Download file</a>
+        <button type="button" class="btn btn--secondary" id="revokeLinkPageBtn">Cancel link</button>`
+        }
+        <button type="button" class="btn btn--secondary" id="copyLinkPageBtn">Copy download link</button>
+      </div>
+      <h3>Activity</h3>
+      <ul class="link-track__events" id="linkEvents">${events || "<li>No activity yet</li>"}</ul>
+    </div>`
+    }
+  </div>
+</div>
+${footer}
+<script src="/js/main.js"></script>
+<script src="/js/file-link-page.js"></script>
 </body>
 </html>`;
 }
@@ -343,6 +454,43 @@ async function handleProcess(req, res) {
   }
 }
 
+async function handleCreateFileLink(req, res) {
+  try {
+    const { fields, files } = await parseMultipart(req);
+    const file = files[0];
+    if (!file) {
+      jsonError(res, 400, "Missing file");
+      return;
+    }
+    if (file.buffer.length > LINK_UPLOAD_LIMIT) {
+      jsonError(
+        res,
+        413,
+        "File too large to create a share link on this host (Vercel ~4.5MB upload limit). Download the file instead."
+      );
+      return;
+    }
+    const meta = createFileLink({
+      buffer: file.buffer,
+      filename: fields.filename || file.filename,
+      contentType: fields.contentType || file.mimeType,
+      tool: fields.tool || "",
+    });
+    const origin = `${req.headers["x-forwarded-proto"] || "http"}://${req.headers.host}`;
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(
+      JSON.stringify({
+        ...publicMeta(meta),
+        downloadUrl: `${origin}/d/${meta.id}`,
+        trackUrl: `${origin}/link/${meta.id}`,
+      })
+    );
+  } catch (err) {
+    console.error("[file-link]", err);
+    jsonError(res, err.status || 500, err.message || "Could not create link");
+  }
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let pathname = decodeURIComponent(url.pathname);
@@ -350,6 +498,70 @@ const server = http.createServer((req, res) => {
 
   if (cleanPath === "/api/process" && req.method === "POST") {
     handleProcess(req, res);
+    return;
+  }
+
+  if (cleanPath === "/api/file-link" && req.method === "POST") {
+    handleCreateFileLink(req, res);
+    return;
+  }
+
+  const linkApi = cleanPath.match(/^\/api\/file-link\/([^/]+)$/);
+  if (linkApi) {
+    const id = decodeURIComponent(linkApi[1]);
+    if (req.method === "GET") {
+      const meta = publicMeta(getFileLink(id));
+      if (!meta) {
+        jsonError(res, 404, "Link not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(meta));
+      return;
+    }
+    if (req.method === "DELETE") {
+      const meta = publicMeta(revokeFileLink(id));
+      if (!meta) {
+        jsonError(res, 404, "Link not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(meta));
+      return;
+    }
+  }
+
+  const downloadRoute = cleanPath.match(/^\/d\/([^/]+)$/);
+  if (req.method === "GET" && downloadRoute) {
+    const id = decodeURIComponent(downloadRoute[1]);
+    const buffer = readFileBuffer(id);
+    const meta = getFileLink(id);
+    if (!buffer || !meta || meta.expired) {
+      res.writeHead(410, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(renderStubPage("Link expired", "This download link is no longer available."));
+      return;
+    }
+    recordDownload(id, {
+      ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress,
+      ua: req.headers["user-agent"],
+    });
+    const encoded = encodeURIComponent(meta.filename).replace(/['()]/g, escape);
+    res.writeHead(200, {
+      "Content-Type": meta.contentType || "application/octet-stream",
+      "Content-Disposition": `attachment; filename="${meta.filename.replace(/"/g, "")}"; filename*=UTF-8''${encoded}`,
+      "Content-Length": buffer.length,
+      "Cache-Control": "no-store",
+    });
+    res.end(buffer);
+    return;
+  }
+
+  const trackRoute = cleanPath.match(/^\/link\/([^/]+)$/);
+  if (req.method === "GET" && trackRoute) {
+    const id = decodeURIComponent(trackRoute[1]);
+    const meta = publicMeta(getFileLink(id));
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderLinkPage(meta));
     return;
   }
 
