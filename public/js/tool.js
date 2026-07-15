@@ -7,8 +7,9 @@
   var processStatusText =
     document.body.getAttribute("data-process-status") || "Processing...";
 
-  // Vercel serverless body limit ~4.5MB. Prefer browser for pdf-lib tools.
-  var SERVER_PAYLOAD_LIMIT = 3.5 * 1024 * 1024;
+  // Reject files over 4MB (Vercel payload constraint).
+  var MAX_FILE_BYTES = 4 * 1024 * 1024;
+  var SERVER_PAYLOAD_LIMIT = 4 * 1024 * 1024;
 
   var files = [];
   var fileIdSeq = 0;
@@ -272,11 +273,33 @@
   }
 
   function addFiles(list) {
+    var accepted = [];
+    var rejected = [];
     list.forEach(function (f) {
+      if (f.size > MAX_FILE_BYTES) {
+        rejected.push(f.name || "file");
+      } else {
+        accepted.push(f);
+      }
+    });
+    accepted.forEach(function (f) {
       files.push({ id: "file-" + ++fileIdSeq, file: f });
     });
-    hideOverlays();
-    renderFiles();
+    if (accepted.length) {
+      hideOverlays();
+      renderFiles();
+    }
+    if (rejected.length) {
+      var msg =
+        "File too large (max 4 MB): " +
+        rejected.join(", ") +
+        ". Please choose a smaller file.";
+      if (!accepted.length && !files.length) {
+        showError(msg);
+      } else {
+        alert(msg);
+      }
+    }
   }
 
   function hideOverlays() {
@@ -390,10 +413,10 @@
 
   async function createShareLink() {
     if (!lastResultBlob) return;
-    if (lastResultBlob.size > 3.5 * 1024 * 1024) {
+    if (lastResultBlob.size > MAX_FILE_BYTES) {
       if (fileLinkStatus) {
         fileLinkStatus.textContent =
-          "File is too large to create a share link on this host (Vercel ~4.5MB limit). Download it instead.";
+          "File too large (max 4 MB). Download the file instead of creating a share link.";
       }
       return;
     }
@@ -481,9 +504,7 @@
         errJson = await res.json();
       } catch (e) {}
       if (res.status === 413) {
-        throw new Error(
-          "File too large for server upload (Vercel ~4.5MB limit). This tool needs a smaller file, or use a browser-side tool like Merge/Split/Rotate."
-        );
+        throw new Error("File too large (max 4 MB). Please choose a smaller file.");
       }
       throw new Error((errJson && errJson.error) || "Processing failed (" + res.status + ")");
     }
@@ -522,7 +543,7 @@
       } else {
         if (totalSize() > SERVER_PAYLOAD_LIMIT) {
           throw new Error(
-            "Combined upload exceeds Vercel’s ~4.5MB limit. Split files or use a client-side tool (Merge, Split, Rotate, Organize)."
+            "Combined upload exceeds 4 MB. Please use fewer or smaller files."
           );
         }
         result = await runServerProcess(options);
