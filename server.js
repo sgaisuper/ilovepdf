@@ -586,6 +586,7 @@ const server = http.createServer((req, res) => {
     res.end(
       JSON.stringify({
         enabled: blobConfigured(),
+        token: !!process.env.BLOB_READ_WRITE_TOKEN,
         presigned: usePresignedUploads(),
         maxFileBytes: blobConfigured() ? MAX_BLOB_BYTES : 4 * 1024 * 1024,
       })
