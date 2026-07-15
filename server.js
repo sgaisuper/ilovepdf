@@ -77,6 +77,41 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function siteOrigin() {
+  const fromEnv = process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL;
+  if (fromEnv) return String(fromEnv).replace(/\/$/, "");
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return "https://" + String(process.env.VERCEL_PROJECT_PRODUCTION_URL).replace(/^https?:\/\//, "");
+  }
+  if (process.env.VERCEL_URL) {
+    return "https://" + String(process.env.VERCEL_URL).replace(/^https?:\/\//, "");
+  }
+  return "https://ilovepdf-seven.vercel.app";
+}
+
+function openGraphTags({ title, description, path = "/", image = "/img/social/ilovepdf.png" }) {
+  const origin = siteOrigin();
+  const pagePath = path === "/" ? "/" : path.startsWith("/") ? path : "/" + path;
+  const url = origin + pagePath;
+  const imageUrl = String(image).startsWith("http") ? image : origin + image;
+  const t = escapeHtml(title);
+  const d = escapeHtml(description || title);
+  return `
+  <meta property="og:site_name" content="iLovePDF - Online tools for PDF"/>
+  <meta property="og:title" content="${t}"/>
+  <meta property="og:description" content="${d}"/>
+  <meta property="og:image" content="${escapeHtml(imageUrl)}"/>
+  <meta property="og:image:width" content="1200"/>
+  <meta property="og:image:height" content="717"/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:url" content="${escapeHtml(url)}"/>
+  <meta name="twitter:card" content="summary_large_image"/>
+  <meta name="twitter:title" content="${t}"/>
+  <meta name="twitter:description" content="${d}"/>
+  <meta name="twitter:image" content="${escapeHtml(imageUrl)}"/>
+  <link rel="canonical" href="${escapeHtml(url)}"/>`;
+}
+
 function renderToolPage(tool) {
   const isHtml = tool.path === "/html-to-pdf";
   const btnLabel = processLabel(tool);
@@ -109,13 +144,26 @@ function renderToolPage(tool) {
       <div class="uploader__droptxt">${escapeHtml(tool.drop)}</div>
       <input type="file" id="fileInput" class="hidden" multiple accept="${escapeHtml(tool.accept)}" />`;
 
+  const pageTitle = `${tool.page_title} - iLovePDF`;
+  const ogImage =
+    tool.path === "/merge_pdf" &&
+    fs.existsSync(path.join(ROOT, "img", "social", "merge.png"))
+      ? "/img/social/merge.png"
+      : "/img/social/ilovepdf.png";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>${escapeHtml(tool.page_title)} - iLovePDF</title>
+  <title>${escapeHtml(pageTitle)}</title>
   <meta name="description" content="${escapeHtml(tool.desc)}"/>
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  ${openGraphTags({
+    title: pageTitle,
+    description: tool.desc,
+    path: tool.path,
+    image: ogImage,
+  })}
   <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
   <link rel="preload" href="/font/Graphik-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
   <link rel="preload" href="/font/Graphik-Semibold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
@@ -219,12 +267,15 @@ ${footer}
 }
 
 function renderStubPage(title, subtitle) {
+  const pageTitle = `${title} - iLovePDF`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>${escapeHtml(title)} - iLovePDF</title>
+  <title>${escapeHtml(pageTitle)}</title>
+  <meta name="description" content="${escapeHtml(subtitle)}"/>
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  ${openGraphTags({ title: pageTitle, description: subtitle, path: "/" })}
   <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
   <link href="/dist/css/web.css" rel="stylesheet">
   <link href="/css/clone-overrides.css" rel="stylesheet">
@@ -283,7 +334,13 @@ function renderLinkPage(meta) {
 <head>
   <meta charset="UTF-8">
   <title>File link tracking - iLovePDF</title>
+  <meta name="description" content="Track downloads for your shared PDF file link."/>
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  ${openGraphTags({
+    title: "File link tracking - iLovePDF",
+    description: "Track downloads for your shared PDF file link.",
+    path: meta ? "/link/" + meta.id : "/link",
+  })}
   <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
   <link href="/dist/css/app.css" rel="stylesheet">
   <link href="/css/clone-overrides.css" rel="stylesheet">
@@ -338,12 +395,27 @@ function renderWorkflowPage({ view, id }) {
     builder: id ? "Edit workflow" : "Create a workflow",
     run: "Run workflow",
   };
+  const pageTitle = `${titles[view] || "Workflows"} - iLovePDF`;
+  const wfPath =
+    view === "builder"
+      ? id
+        ? "/user/workflows/" + id
+        : "/user/workflows/new"
+      : view === "run"
+        ? "/user/workflows/" + (id || "") + "/run"
+        : "/user/workflows";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>${escapeHtml(titles[view] || "Workflows")} - iLovePDF</title>
+  <title>${escapeHtml(pageTitle)}</title>
+  <meta name="description" content="Chain PDF tools together into reusable workflows."/>
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  ${openGraphTags({
+    title: pageTitle,
+    description: "Chain PDF tools together into reusable workflows.",
+    path: wfPath,
+  })}
   <link rel="icon" type="image/png" href="/img/favicons-pdf/favicon-32x32.png">
   <link rel="preload" href="/font/Graphik-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
   <link href="/dist/css/app.css" rel="stylesheet">
