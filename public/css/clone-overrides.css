@@ -355,7 +355,7 @@ body.process-run #processTaskWrapper {
 }
 
 #process.process {
-  display: none;
+  display: none !important;
   flex-direction: column;
   align-items: center;
   justify-content: center;

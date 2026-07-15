@@ -314,13 +314,16 @@
     }
   }
 
+  function hideProcessOverlay() {
+    if (!processEl) return;
+    processEl.style.display = "none";
+    processEl.classList.remove("active", "process--error", "process--done");
+  }
+
   function hideOverlays() {
     document.body.classList.remove("process-run", "upload-run");
     if (uploadingEl) uploadingEl.style.display = "none";
-    if (processEl) {
-      processEl.style.display = "none";
-      processEl.classList.remove("active", "process--error", "process--done");
-    }
+    hideProcessOverlay();
     if (downloadEl) downloadEl.hidden = true;
     if (workArea) workArea.style.display = "";
     var toolRoot = document.querySelector(".tool");
@@ -333,7 +336,7 @@
     var toolRoot = document.querySelector(".tool");
     if (toolRoot) toolRoot.style.display = "none";
     if (processTask) processTask.style.display = "none";
-    if (processEl) processEl.style.display = "none";
+    hideProcessOverlay();
     if (downloadEl) downloadEl.hidden = true;
     if (uploadingEl) uploadingEl.style.display = "flex";
     if (uploadTotal) uploadTotal.textContent = String(files.length);
@@ -401,7 +404,8 @@
     document.body.classList.add("process-run");
     document.body.classList.remove("upload-run");
     if (uploadingEl) uploadingEl.style.display = "none";
-    if (processEl) processEl.style.display = "none";
+    // Must remove .active — CSS uses display:flex !important while .active is set
+    hideProcessOverlay();
     if (workArea) workArea.style.display = "none";
     var toolRoot = document.querySelector(".tool");
     if (toolRoot) toolRoot.style.display = "none";
