@@ -22,7 +22,7 @@ const ROOT = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
 const MAX_FILE_SIZE = 80 * 1024 * 1024; // 80MB per file
 const MAX_FILES = 40;
-const LINK_UPLOAD_LIMIT = 3.5 * 1024 * 1024; // stay under Vercel ~4.5MB
+const LINK_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4MB max
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -463,11 +463,7 @@ async function handleCreateFileLink(req, res) {
       return;
     }
     if (file.buffer.length > LINK_UPLOAD_LIMIT) {
-      jsonError(
-        res,
-        413,
-        "File too large to create a share link on this host (Vercel ~4.5MB upload limit). Download the file instead."
-      );
+      jsonError(res, 413, "File too large (max 4 MB).");
       return;
     }
     const meta = createFileLink({
